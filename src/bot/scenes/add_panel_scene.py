@@ -11,6 +11,8 @@ from telegram.ext import (
 )
 
 from src.services.panel import PanelService
+from src.bot.menus.add_panel_menu import AddPanelMenu
+from src.bot.menus.admin_menu import AdminMenu
 
 # Conversation states
 (PANEL_NAME, PANEL_URL, PANEL_USERNAME, PANEL_PASSWORD) = range(4)
@@ -20,6 +22,8 @@ class AddPanelScene:
     
     def __init__(self):
         self.panel_service = PanelService()
+        self.add_panel_menu = AddPanelMenu()
+        self.admin_menu = AdminMenu()
     
     def get_handler(self):
         """Get the conversation handler for this scene"""
@@ -36,15 +40,32 @@ class AddPanelScene:
     
     async def start_scene(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start the scene"""
-        await update.callback_query.message.edit_text(
-            "برای اضافه کردن پنل به ربات ابتدا یک نام برای پنل خود ارسال کنید\n\n"
-            "⚠️ توجه: نام پنل نامی است که در هنگام انجام عملیات جستجو نشان داده می شود."
-        )
+        # Show menu with only back button
+        await self.add_panel_menu.show(update, context)
+        
+        # Check if this was triggered by a callback or message
+        if update.callback_query:
+            await update.callback_query.message.edit_text(
+                "برای اضافه کردن پنل به ربات ابتدا یک نام برای پنل خود ارسال کنید\n\n"
+                "⚠️ توجه: نام پنل نامی است که در هنگام انجام عملیات جستجو نشان داده می شود."
+            )
+        else:
+            await update.message.reply_text(
+                "برای اضافه کردن پنل به ربات ابتدا یک نام برای پنل خود ارسال کنید\n\n"
+                "⚠️ توجه: نام پنل نامی است که در هنگام انجام عملیات جستجو نشان داده می شود."
+            )
         return PANEL_NAME
     
     async def panel_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle panel name entry"""
         panel_name = update.message.text
+        
+        # Check if user is trying to go back
+        if panel_name == "🔙 بازگشت به بخش مدیریت":
+            context.user_data['in_conversation'] = False
+            await self.admin_menu.show(update, context)
+            return ConversationHandler.END
+            
         context.user_data['panel_name'] = panel_name
         
         await update.message.reply_text(
@@ -61,6 +82,13 @@ class AddPanelScene:
     async def panel_url(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle panel URL entry"""
         panel_url = update.message.text
+        
+        # Check if user is trying to go back
+        if panel_url == "🔙 بازگشت به بخش مدیریت":
+            context.user_data['in_conversation'] = False
+            await self.admin_menu.show(update, context)
+            return ConversationHandler.END
+            
         context.user_data['panel_url'] = panel_url
         
         await update.message.reply_text(
@@ -72,6 +100,13 @@ class AddPanelScene:
     async def panel_username(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle panel username entry"""
         panel_username = update.message.text
+        
+        # Check if user is trying to go back
+        if panel_username == "🔙 بازگشت به بخش مدیریت":
+            context.user_data['in_conversation'] = False
+            await self.admin_menu.show(update, context)
+            return ConversationHandler.END
+            
         context.user_data['panel_username'] = panel_username
         
         await update.message.reply_text(
@@ -83,6 +118,13 @@ class AddPanelScene:
     async def panel_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle panel password entry"""
         panel_password = update.message.text
+        
+        # Check if user is trying to go back
+        if panel_password == "🔙 بازگشت به بخش مدیریت":
+            context.user_data['in_conversation'] = False
+            await self.admin_menu.show(update, context)
+            return ConversationHandler.END
+            
         context.user_data['panel_password'] = panel_password
         
         # Show typing status to indicate processing
@@ -141,15 +183,30 @@ class AddPanelScene:
                                 context.user_data['panel_password']
                             )
                             
+                            # Reset conversation flag
+                            context.user_data['in_conversation'] = False
+                            
+                            from src.bot.menus.main_menu import MainMenu
+                            main_menu = MainMenu()
+                            
                             await update.message.reply_text(
                                 f"🎉 تبریک! پنل شما با موفقیت اضافه گردید و فعال است.\n"
                                 f"✅ پنل فعال و در دسترس است\n\n"
                                 f"می‌توانید با دستور /start به منوی اصلی برگردید."
                             )
+                            # Show main menu after successful panel addition
+                            await main_menu.show(update, context)
                             return ConversationHandler.END
                         else:
                             # Login failed, show error
                             error_msg = result.get('msg', 'نام کاربری یا رمز عبور نادرست')
+                            
+                            # Reset conversation flag
+                            context.user_data['in_conversation'] = False
+                            
+                            from src.bot.menus.main_menu import MainMenu
+                            main_menu = MainMenu()
+                            
                             await update.message.reply_text(
                                 f"❌ اتصال به پنل برقرار شد اما ورود ناموفق بود.\n"
                                 f"⚠️ {error_msg}\n\n"
@@ -158,6 +215,8 @@ class AddPanelScene:
                                 f"• پنل نیاز به تنظیمات بیشتری دارد\n\n"
                                 f"لطفاً اطلاعات ورودی پنل را بررسی کنید و دوباره تلاش کنید."
                             )
+                            # Show main menu after failure
+                            await main_menu.show(update, context)
                             return ConversationHandler.END
                     
                     # If there's no specific success field but response contains other common fields
@@ -240,5 +299,10 @@ class AddPanelScene:
     
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel the conversation"""
+        # Reset conversation flag
+        context.user_data['in_conversation'] = False
+        
         await update.message.reply_text("❌ عملیات لغو شد.")
+        # Return to admin menu
+        await self.admin_menu.show(update, context)
         return ConversationHandler.END 
