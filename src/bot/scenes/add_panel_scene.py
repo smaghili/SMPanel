@@ -1,21 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters
 )
+import logging
 
 from src.services.panel import PanelService
 from src.bot.menus.add_panel_menu import AddPanelMenu
 from src.bot.menus.admin_menu import AdminMenu
 
+# Setup logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 # Conversation states
-(PANEL_NAME, PANEL_URL, PANEL_USERNAME, PANEL_PASSWORD) = range(4)
+(PANEL_NAME, PANEL_TYPE, PANEL_URL, PANEL_USERNAME, PANEL_PASSWORD) = range(5)
 
 class AddPanelScene:
     """Scene for adding a new panel"""
@@ -31,6 +40,7 @@ class AddPanelScene:
             entry_points=[],  # This will be set by the caller
             states={
                 PANEL_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.panel_name)],
+                PANEL_TYPE: [CallbackQueryHandler(self.panel_type)],
                 PANEL_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.panel_url)],
                 PANEL_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.panel_username)],
                 PANEL_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.panel_password)],
@@ -68,14 +78,51 @@ class AddPanelScene:
             
         context.user_data['panel_name'] = panel_name
         
+        # Create inline keyboard for panel type selection
+        keyboard = [
+            [InlineKeyboardButton("پنل 3x-ui", callback_data="panel_type_3x-ui")],
+            [InlineKeyboardButton("پنل مرزبان", callback_data="panel_type_marzban")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
-            "🔗 نام پنل ذخیره شد. حالا آدرس پنل خود را ارسال کنید.\n"
-            "⚠️ توجه:\n"
-            "🔸 آدرس پنل باید بدون dashboard ارسال شود.\n"
-            "🔹 در صورتی که پورت پنل 443 است، پورت را نباید وارد کنید. (گاهی حتما با پورت باید وارد کنید)\n"
-            "🔸 آخر آدرس نباید / داشته باشد.\n"
-            "🔹 در صورت وارد کردن آیپی، حتما http یا https باید داشته باشد."
+            "🔧 لطفاً نوع پنل را انتخاب کنید:",
+            reply_markup=reply_markup
         )
+        
+        return PANEL_TYPE
+    
+    async def panel_type(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle panel type selection"""
+        query = update.callback_query
+        await query.answer()
+        
+        callback_data = query.data
+        panel_type = callback_data.replace("panel_type_", "")
+        
+        # Save panel type
+        context.user_data['panel_type'] = panel_type
+        
+        # Display message based on panel type
+        if panel_type == '3x-ui':
+            await query.edit_message_text(
+                f"🔧 نوع پنل انتخاب شده: {panel_type}\n\n"
+                f"🔗 حالا آدرس پنل خود را ارسال کنید.\n"
+                f"⚠️ توجه:\n"
+                f"🔹 در صورتی که پورت پنل 443 است، پورت را نباید وارد کنید. (گاهی حتما با پورت باید وارد کنید)\n"
+                f"🔸 آخر آدرس نباید / داشته باشد.\n"
+                f"🔹 در صورت وارد کردن آیپی، حتما http یا https باید داشته باشد."
+            )
+        else:
+            await query.edit_message_text(
+                f"🔧 نوع پنل انتخاب شده: {panel_type}\n\n"
+                f"🔗 حالا آدرس پنل خود را ارسال کنید.\n"
+                f"⚠️ توجه:\n"
+                f"🔸 آدرس پنل باید بدون dashboard ارسال شود.\n"
+                f"🔹 در صورتی که پورت پنل 443 است، پورت را نباید وارد کنید. (گاهی حتما با پورت باید وارد کنید)\n"
+                f"🔸 آخر آدرس نباید / داشته باشد.\n"
+                f"🔹 در صورت وارد کردن آیپی، حتما http یا https باید داشته باشد."
+            )
         
         return PANEL_URL
     
@@ -140,7 +187,8 @@ class AddPanelScene:
                 'name': context.user_data['panel_name'],
                 'url': context.user_data['panel_url'],
                 'username': context.user_data['panel_username'],
-                'password': context.user_data['panel_password']
+                'password': context.user_data['panel_password'],
+                'panel_type': context.user_data['panel_type']
             }
             
             # Send request to panel to check if login works
@@ -149,156 +197,128 @@ class AddPanelScene:
             if not url.startswith(('http://', 'https://')):
                 url = 'http://' + url
                 
-            # Append /login path if it doesn't have it
-            if not url.endswith('/login'):
-                url = url.rstrip('/') + '/login'
-            
-            # Prepare login payload
-            payload = {
-                'username': panel_data['username'],
-                'password': panel_data['password']
-            }
-            
-            # Send POST request to panel login URL
-            import requests
-            from requests.exceptions import RequestException
-            import json
-            
-            response = requests.post(url, data=payload, timeout=10)
-            
-            # Check if response is successful and contains valid JSON
-            if response.status_code == 200:
+            # Append /login path if it doesn't have it and it's a 3x-ui panel
+            if panel_data['panel_type'] == '3x-ui':
+                if not url.endswith('/login'):
+                    url = url.rstrip('/') + '/login'
+                    
+                # Prepare login payload
+                payload = {
+                    'username': panel_data['username'],
+                    'password': panel_data['password']
+                }
+                
+                # Send POST request to panel login URL
+                import requests
+                from requests.exceptions import RequestException
+                import json
+                
                 try:
-                    # Try to parse JSON response
-                    result = response.json()
+                    response = requests.post(url, data=payload, timeout=10)
                     
-                    # Check if login was successful
-                    if 'success' in result:
-                        if result['success'] is True:
-                            # Login successful, save panel to database
-                            panel_id = self.panel_service.add_panel(
-                                context.user_data['panel_name'],
-                                context.user_data['panel_url'],
-                                context.user_data['panel_username'],
-                                context.user_data['panel_password']
-                            )
-                            
-                            # Reset conversation flag
-                            context.user_data['in_conversation'] = False
-                            
-                            from src.bot.menus.main_menu import MainMenu
-                            main_menu = MainMenu()
-                            
+                    if response.status_code == 200:
+                        try:
+                            result = response.json()
+                            if 'success' in result and result['success'] is True:
+                                # Login successful, add panel to database
+                                panel_id = self.panel_service.add_panel(
+                                    panel_data['name'],
+                                    panel_data['url'],
+                                    panel_data['username'],
+                                    panel_data['password'],
+                                    panel_data['panel_type']
+                                )
+                                
+                                await update.message.reply_text(
+                                    f"✅ پنل با موفقیت به ربات اضافه شد.\n"
+                                    f"🆔 شناسه پنل: {panel_id}\n"
+                                    f"📝 نام پنل: {panel_data['name']}\n"
+                                    f"🔧 نوع پنل: {panel_data['panel_type']}\n"
+                                    f"🔗 آدرس پنل: {panel_data['url']}"
+                                )
+                                
+                                # Reset conversation flag
+                                context.user_data['in_conversation'] = False
+                                
+                                # Return to admin menu
+                                await self.admin_menu.show(update, context)
+                                return ConversationHandler.END
+                            else:
+                                await update.message.reply_text(
+                                    "❌ نام کاربری یا رمز عبور اشتباه است."
+                                )
+                                # Ask for password again
+                                return PANEL_PASSWORD
+                        except json.JSONDecodeError:
+                            # Response is not JSON, try to check if it's a redirection to dashboard
                             await update.message.reply_text(
-                                f"🎉 تبریک! پنل شما با موفقیت اضافه گردید و فعال است.\n"
-                                f"✅ پنل فعال و در دسترس است\n\n"
-                                f"می‌توانید با دستور /start به منوی اصلی برگردید."
+                                "⚠️ پاسخ پنل قابل تشخیص نیست.\n"
+                                "لطفاً آدرس پنل را بررسی کنید و دوباره تلاش کنید."
                             )
-                            # Show main menu after successful panel addition
-                            await main_menu.show(update, context)
-                            return ConversationHandler.END
-                        else:
-                            # Login failed, show error
-                            error_msg = result.get('msg', 'نام کاربری یا رمز عبور نادرست')
-                            
-                            # Reset conversation flag
-                            context.user_data['in_conversation'] = False
-                            
-                            from src.bot.menus.main_menu import MainMenu
-                            main_menu = MainMenu()
-                            
-                            await update.message.reply_text(
-                                f"❌ اتصال به پنل برقرار شد اما ورود ناموفق بود.\n"
-                                f"⚠️ {error_msg}\n\n"
-                                f"دلایل احتمالی:\n"
-                                f"• نام کاربری یا رمز عبور اشتباه است\n"
-                                f"• پنل نیاز به تنظیمات بیشتری دارد\n\n"
-                                f"لطفاً اطلاعات ورودی پنل را بررسی کنید و دوباره تلاش کنید."
-                            )
-                            # Show main menu after failure
-                            await main_menu.show(update, context)
-                            return ConversationHandler.END
-                    
-                    # If there's no specific success field but response contains other common fields
-                    elif any(key in result for key in ['status', 'result', 'data']):
-                        # Looks like a valid API response, try to save panel
-                        panel_id = self.panel_service.add_panel(
-                            context.user_data['panel_name'],
-                            context.user_data['panel_url'],
-                            context.user_data['panel_username'],
-                            context.user_data['panel_password']
-                        )
-                        
+                            # Go back to URL step
+                            return PANEL_URL
+                    elif response.status_code == 401:
                         await update.message.reply_text(
-                            f"🎉 تبریک! پنل شما با موفقیت اضافه گردید.\n"
-                            f"✅ پنل فعال و در دسترس است\n\n"
-                            f"می‌توانید با دستور /start به منوی اصلی برگردید."
+                            "❌ نام کاربری یا رمز عبور اشتباه است."
                         )
-                        return ConversationHandler.END
-                        
-                except (json.JSONDecodeError, ValueError):
-                    # Response is not valid JSON, check if it contains login page
-                    if 'login' in response.text.lower() or 'admin' in response.text.lower():
-                        # Looks like a valid panel but not JSON API
-                        panel_id = self.panel_service.add_panel(
-                            context.user_data['panel_name'],
-                            context.user_data['panel_url'],
-                            context.user_data['panel_username'],
-                            context.user_data['panel_password']
-                        )
-                        
-                        await update.message.reply_text(
-                            f"🎉 تبریک! پنل شما با موفقیت اضافه گردید.\n"
-                            f"✅ پاسخ پنل HTML است، احتمالاً صفحه ورود\n\n"
-                            f"می‌توانید با دستور /start به منوی اصلی برگردید."
-                        )
-                        return ConversationHandler.END
+                        # Ask for password again
+                        return PANEL_PASSWORD
                     else:
-                        # Unknown response
                         await update.message.reply_text(
-                            f"❌ پنل پاسخ داد اما فرمت پاسخ قابل شناسایی نیست.\n"
-                            f"⚠️ ممکن است آدرس لاگین اشتباه باشد.\n\n"
+                            f"❌ خطا در اتصال به پنل. کد خطا: {response.status_code}\n"
                             f"لطفاً آدرس پنل را بررسی کنید و دوباره تلاش کنید."
                         )
-                        return ConversationHandler.END
-            
-            # Handle non-200 responses
-            else:
-                await update.message.reply_text(
-                    f"❌ اتصال به پنل با خطا مواجه شد (کد {response.status_code}).\n"
-                    f"دلایل احتمالی:\n"
-                    f"• آدرس پنل اشتباه است\n"
-                    f"• پنل در دسترس نیست\n"
-                    f"• مسیر لاگین متفاوت است\n\n"
-                    f"لطفاً آدرس را بررسی کنید و دوباره تلاش کنید."
+                        # Go back to URL step
+                        return PANEL_URL
+                except RequestException as e:
+                    await update.message.reply_text(
+                        f"❌ خطا در اتصال به پنل: {str(e)}\n"
+                        f"لطفاً آدرس پنل را بررسی کنید و دوباره تلاش کنید."
+                    )
+                    # Go back to URL step
+                    return PANEL_URL
+            elif panel_data['panel_type'] == 'marzban':
+                # For Marzban panels, we'll implement the connection check later
+                # For now, just add it to the database
+                panel_id = self.panel_service.add_panel(
+                    panel_data['name'],
+                    panel_data['url'],
+                    panel_data['username'],
+                    panel_data['password'],
+                    panel_data['panel_type']
                 )
+                
+                await update.message.reply_text(
+                    f"✅ پنل مرزبان با موفقیت به ربات اضافه شد.\n"
+                    f"🆔 شناسه پنل: {panel_id}\n"
+                    f"📝 نام پنل: {panel_data['name']}\n"
+                    f"🔧 نوع پنل: {panel_data['panel_type']}\n"
+                    f"🔗 آدرس پنل: {panel_data['url']}\n\n"
+                    f"⚠️ توجه: پشتیبانی کامل از پنل مرزبان در حال توسعه است."
+                )
+                
+                # Reset conversation flag
+                context.user_data['in_conversation'] = False
+                
+                # Return to admin menu
+                await self.admin_menu.show(update, context)
                 return ConversationHandler.END
                 
-        except RequestException as e:
-            # Connection error
-            await update.message.reply_text(
-                f"❌ خطا در اتصال به پنل: {str(e)}\n\n"
-                f"دلایل احتمالی:\n"
-                f"• آدرس پنل اشتباه است\n"
-                f"• پنل در دسترس نیست\n"
-                f"• فایروال یا محدودیت دسترسی\n\n"
-                f"لطفاً آدرس را بررسی کنید و دوباره تلاش کنید."
-            )
-            return ConversationHandler.END
-            
         except Exception as e:
-            # Other errors
-            error_message = str(e)
-            print(f"Error: {error_message}")
-            
             await update.message.reply_text(
-                f"❌ خطای غیرمنتظره: {error_message}\n\n"
-                f"لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+                f"❌ خطا: {str(e)}\n"
+                f"لطفاً دوباره تلاش کنید."
             )
-            return ConversationHandler.END
+            # Go back to start
+            return await self.start_scene(update, context)
     
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel the conversation"""
+        # Clean up user data
+        for key in ['panel_name', 'panel_type', 'panel_url', 'panel_username', 'panel_password']:
+            if key in context.user_data:
+                del context.user_data[key]
+        
         # Reset conversation flag
         context.user_data['in_conversation'] = False
         

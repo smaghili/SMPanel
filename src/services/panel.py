@@ -38,18 +38,18 @@ class PanelService:
             # Persian error message for Telegram, but error is logged in English
             raise Exception(f"خطا در اتصال به پایگاه داده: {e}")
     
-    def add_panel(self, name, url, username, password):
+    def add_panel(self, name, url, username, password, panel_type='3x-ui'):
         """Add a new panel"""
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
-            logger.info(f"Adding new panel: {name}")
+            logger.info(f"Adding new panel: {name}, Type: {panel_type}")
             cursor.execute(
                 """
-                INSERT INTO panels (name, url, username, password, status)
-                VALUES (%s, %s, %s, %s, 'active')
+                INSERT INTO panels (name, url, username, password, panel_type, status)
+                VALUES (%s, %s, %s, %s, %s, 'active')
                 """,
-                (name, url, username, password)
+                (name, url, username, password, panel_type)
             )
             panel_id = cursor.lastrowid
             cursor.close()
