@@ -16,6 +16,7 @@ import traceback
 from src.services.shop_service import ShopService
 from src.bot.menus.shop_menu import ShopMenu
 from src.bot.menus.admin_menu import AdminMenu
+from src.bot.menus.add_category_menu import AddCategoryMenu
 
 # Setup logging
 logging.basicConfig(
@@ -34,6 +35,7 @@ class AddCategoryScene:
         self.shop_service = ShopService()
         self.shop_menu = ShopMenu()
         self.admin_menu = AdminMenu()
+        self.add_category_menu = AddCategoryMenu()
     
     def get_handler(self):
         """Get the conversation handler for this scene"""
@@ -60,26 +62,34 @@ class AddCategoryScene:
         logger.info(f"Starting add_category scene for user {update.effective_user.id}")
         logger.info(f"Current conversation state: ADD_CATEGORY_NAME ({ADD_CATEGORY_NAME})")
         
+        # تنظیم کیبورد با دکمه بازگشت بدون ارسال پیام اضافی
+        self.add_category_menu.setup_menu()
+        keyboard_markup = self.add_category_menu.create_keyboard_markup()
+        
+        # ارسال پیام اصلی با کیبورد بازگشت
         await update.message.reply_text(
             "🛒 اضافه کردن دسته بندی\n\n"
-            "📌 نام دسته بندی را ارسال کنید"
+            "📌 نام دسته بندی را ارسال کنید",
+            reply_markup=keyboard_markup
         )
+        
         return ADD_CATEGORY_NAME
     
     async def category_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle category name entry"""
         try:
-            # Show processing message to let user know we're working on it
-            processing_message = await update.message.reply_text("⏳ در حال پردازش...")
-            
             category_name = update.message.text
             logger.info(f"Received category name: '{category_name}' from user {update.effective_user.id}")
             
             # Check if user is trying to go back
             if category_name == "🔙 بازگشت به بخش فروشگاه":
                 context.user_data['in_conversation'] = False
+                await update.message.reply_text("❌ عملیات لغو شد.")
                 await self.shop_menu.show(update, context)
                 return ConversationHandler.END
+            
+            # Show processing message to let user know we're working on it
+            processing_message = await update.message.reply_text("⏳ در حال پردازش...")
             
             # Save category name in user data
             context.user_data['category_name'] = category_name

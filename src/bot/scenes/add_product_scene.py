@@ -16,6 +16,7 @@ import traceback
 from src.services.shop_service import ShopService
 from src.bot.menus.shop_menu import ShopMenu
 from src.bot.menus.admin_menu import AdminMenu
+from src.bot.menus.add_product_menu import AddProductMenu
 
 # Setup logging
 logging.basicConfig(
@@ -41,6 +42,7 @@ class AddProductScene:
         self.shop_service = ShopService()
         self.shop_menu = ShopMenu()
         self.admin_menu = AdminMenu()
+        self.add_product_menu = AddProductMenu()
     
     def get_handler(self):
         """Get the conversation handler for this scene"""
@@ -63,14 +65,21 @@ class AddProductScene:
         context.user_data['in_conversation'] = True
         logger.info(f"Starting add_product scene for user {update.effective_user.id}")
         
+        # تنظیم کیبورد با دکمه بازگشت بدون ارسال پیام اضافی
+        self.add_product_menu.setup_menu()
+        keyboard_markup = self.add_product_menu.create_keyboard_markup()
+        
+        # ارسال پیام اصلی با کیبورد بازگشت
         await update.message.reply_text(
             "🛍 اضافه کردن محصول\n\n"
             "📌 ابتدا نام اشتراک خود را ارسال نمایید\n"
             "⚠️ نکات هنگام وارد کردن نام محصول:\n"
             "• در کنار نام اشتراک حتما قیمت اشتراک را هم وارد کنید.\n"
             "• در کنار نام اشتراک حتما زمان اشتراک را هم وارد کنید.\n\n"
-            "به عنوان مثال: ۱ ماه ۲۰۰ گیگ ۱۵۰ هزار تومان"
+            "به عنوان مثال: ۱ ماه ۲۰۰ گیگ ۱۵۰ هزار تومان",
+            reply_markup=keyboard_markup
         )
+        
         return PRODUCT_NAME
     
     async def product_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -82,6 +91,7 @@ class AddProductScene:
             # Check if user is trying to go back
             if product_name == "🔙 بازگشت به بخش فروشگاه":
                 context.user_data['in_conversation'] = False
+                await update.message.reply_text("❌ عملیات لغو شد.")
                 await self.shop_menu.show(update, context)
                 return ConversationHandler.END
             
@@ -150,6 +160,7 @@ class AddProductScene:
                 "❌ دسته بندی انتخاب شده معتبر نیست.\n"
                 "لطفاً دوباره تلاش کنید."
             )
+            context.user_data['in_conversation'] = False
             return ConversationHandler.END
         
         # Save category in user data
@@ -314,6 +325,9 @@ class AddProductScene:
                 
                 context.user_data['in_conversation'] = False
                 
+                # نمایش منوی فروشگاه بعد از ذخیره موفق
+                await self.shop_menu.show(update, context)
+                
                 return ConversationHandler.END
                 
             except Exception as e:
@@ -322,6 +336,8 @@ class AddProductScene:
                     f"❌ خطا در افزودن محصول: {str(e)}\n"
                     f"لطفاً دوباره تلاش کنید."
                 )
+                context.user_data['in_conversation'] = False
+                await self.shop_menu.show(update, context)
                 return ConversationHandler.END
             
         except Exception as e:

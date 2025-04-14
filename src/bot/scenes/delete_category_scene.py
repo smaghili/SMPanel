@@ -110,6 +110,16 @@ class DeleteCategoryScene:
         query = update.callback_query
         await query.answer()
         
+        # بررسی کن که آیا هنوز در گفتگو هستیم
+        if not context.user_data.get('in_conversation', False):
+            # کاربر از طریق دکمه‌های فیزیکی از گفتگو خارج شده است
+            try:
+                await query.edit_message_text("⚠️ عملیات لغو شده است.")
+            except Exception:
+                # ممکن است پیام قبلاً ویرایش شده باشد
+                pass
+            return ConversationHandler.END
+            
         callback_data = query.data
         
         if callback_data == "back":
@@ -205,6 +215,16 @@ class DeleteCategoryScene:
         """Handle delete confirmation"""
         query = update.callback_query
         await query.answer()
+        
+        # بررسی کن که آیا هنوز در گفتگو هستیم
+        if not context.user_data.get('in_conversation', False):
+            # کاربر از طریق دکمه‌های فیزیکی از گفتگو خارج شده است
+            try:
+                await query.edit_message_text("⚠️ عملیات لغو شده است.")
+            except Exception:
+                # ممکن است پیام قبلاً ویرایش شده باشد
+                pass
+            return ConversationHandler.END
         
         callback_data = query.data
         

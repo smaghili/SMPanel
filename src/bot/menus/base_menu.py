@@ -39,10 +39,23 @@ class BaseMenu(ABC):
     async def show(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show menu to user"""
         self.setup_menu()
-        await update.message.reply_text(
-            text=self.message,
-            reply_markup=self.create_keyboard_markup()
-        )
+        
+        # Create keyboard markup
+        keyboard_markup = self.create_keyboard_markup()
+        
+        # Check if message is empty
+        if not self.message or self.message.strip() == "":
+            # If message is empty, just update the keyboard without sending a new message
+            await update.message.reply_text(
+                text=" ",  # یک فاصله خالی برای جلوگیری از خطا
+                reply_markup=keyboard_markup
+            )
+        else:
+            # Normal case: send message with keyboard
+            await update.message.reply_text(
+                text=self.message,
+                reply_markup=keyboard_markup
+            )
     
     def create_button(self, text: str) -> KeyboardButton:
         """Create a keyboard button"""

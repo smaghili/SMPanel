@@ -100,13 +100,42 @@ user_states = {}
 async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle menu navigation"""
     try:
-        # Skip processing if we're in a conversation
-        if context.user_data.get('in_conversation'):
-            logger.debug(f"User is in conversation, skipping menu navigation")
-            return
-            
         message_text = update.message.text
         user_id = update.effective_user.id
+        
+        # همیشه درخواست‌های بازگشت را بررسی کن، حتی در حالت مکالمه
+        if message_text == "🔙 بازگشت به منوی اصلی":
+            # لغو هر نوع مکالمه و بازگشت به منوی اصلی
+            context.user_data['in_conversation'] = False
+            # پاکسازی هر گونه داده موقتی
+            for key in list(context.user_data.keys()):
+                if key.startswith('selected_'):
+                    del context.user_data[key]
+            user_states[user_id] = "main"
+            await main_menu.show(update, context)
+            return
+        
+        elif message_text == "🔙 بازگشت به بخش مدیریت":
+            # لغو هر نوع مکالمه و بازگشت به منوی مدیریت
+            was_in_conversation = context.user_data.get('in_conversation', False)
+            context.user_data['in_conversation'] = False
+            # پاکسازی هر گونه داده موقتی
+            for key in list(context.user_data.keys()):
+                if key.startswith('selected_'):
+                    del context.user_data[key]
+            user_states[user_id] = "admin"
+            
+            # نمایش پیام لغو اگر در مکالمه بودیم
+            if was_in_conversation:
+                await update.message.reply_text("❌ عملیات لغو شد.")
+                
+            await admin_menu.show(update, context)
+            return
+            
+        # Skip other processing if we're in a conversation
+        if context.user_data.get('in_conversation'):
+            logger.debug(f"User is in conversation, skipping other menu navigation")
+            return
         
         # Track user state
         current_state = user_states.get(user_id, "main")
@@ -119,16 +148,6 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
                 await admin_menu.show(update, context)
             else:
                 await update.message.reply_text("⛔ شما دسترسی به این بخش را ندارید.")
-        
-        elif message_text == "🔙 بازگشت به منوی اصلی":
-            # Always return to main menu
-            user_states[user_id] = "main"
-            await main_menu.show(update, context)
-        
-        elif message_text == "🔙 بازگشت به بخش مدیریت":
-            # Return to admin menu
-            user_states[user_id] = "admin"
-            await admin_menu.show(update, context)
         
         elif message_text == "🖥 اضافه کردن پنل":
             if admin_middleware.is_admin(user_id):
@@ -151,13 +170,26 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
         # Shop menu navigation
         elif current_state == "shop":
             logger.info(f"Handling shop menu option: {message_text}")
-            if message_text == "🛍️ اضافه کردن محصول":
-                await shop_menu.add_product(update, context)
-            elif message_text == "❌ حذف محصول":
-                await shop_menu.delete_product(update, context)
-            elif message_text == "❌ حذف دسته بندی":
-                await shop_menu.delete_category(update, context)
-            elif message_text == "✏️ ویرایش محصول":
+            
+            # These menu items have dedicated ConversationHandlers with higher priority
+            # Skip them here to avoid processing them twice
+            # The duplication happens because the handler with higher priority (ConversationHandler)
+            # processes the message, but then it also reaches this handler
+            conversation_handled_options = [
+                "❌ حذف محصول",
+                "🛍️ اضافه کردن محصول",
+                "❌ حذف دسته بندی",
+                "🛒 اضافه کردن دسته بندی"
+            ]
+            
+            if message_text in conversation_handled_options:
+                # These should be handled by their respective ConversationHandlers
+                # with higher priority, so we just return here
+                logger.debug(f"Skipping menu item '{message_text}' that should be handled by a ConversationHandler")
+                return
+            
+            # Handle other shop menu options
+            if message_text == "✏️ ویرایش محصول":
                 await shop_menu.edit_product(update, context)
             elif message_text == "➕ تنظیم قیمت حجم اضافه":
                 await shop_menu.set_volume_price(update, context)
@@ -172,6 +204,7 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
         
         elif message_text in ["📊 آمار ربات", "⚙️ تنظیمات اکانت تست", "💰 مالی"]:
             await update.message.reply_text("🚧 این بخش در حال توسعه است...")
+            
     except Exception as e:
         logger.error(f"Error in handle_menu_navigation: {e}")
         logger.error(traceback.format_exc())
@@ -246,6 +279,76 @@ async def error_handler(update, context):
     if update and update.effective_message:
         await update.effective_message.reply_text("❌ خطایی رخ داده است. لطفاً دوباره تلاش کنید.")
 
+async def handle_back_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle back to admin menu request in conversations"""
+    logger.info("Handling back to admin in conversation fallbacks")
+    
+    # Reset conversation state and clean up data
+    was_in_conversation = context.user_data.get('in_conversation', False)
+    context.user_data['in_conversation'] = False
+    
+    # Clean up any temporary data
+    for key in list(context.user_data.keys()):
+        if key.startswith('selected_'):
+            del context.user_data[key]
+    
+    # Update user state
+    user_id = update.effective_user.id
+    user_states[user_id] = "admin"
+    
+    # Show cancellation message if we were in conversation
+    if was_in_conversation:
+        await update.message.reply_text("❌ عملیات لغو شد.")
+    
+    # Show admin menu
+    await admin_menu.show(update, context)
+    
+    # End conversation if we were in one
+    if was_in_conversation:
+        return ConversationHandler.END
+    return None
+
+async def handle_back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle back to main menu request in conversations"""
+    logger.info("Handling back to main in conversation fallbacks")
+    
+    # Reset conversation state and clean up data
+    was_in_conversation = context.user_data.get('in_conversation', False)
+    context.user_data['in_conversation'] = False
+    
+    # Clean up any temporary data
+    for key in list(context.user_data.keys()):
+        if key.startswith('selected_'):
+            del context.user_data[key]
+    
+    # Update user state
+    user_id = update.effective_user.id
+    user_states[user_id] = "main"
+    
+    # Show cancellation message if we were in conversation
+    if was_in_conversation:
+        await update.message.reply_text("❌ عملیات لغو شد.")
+    
+    # Show main menu
+    await main_menu.show(update, context)
+    
+    # End conversation if we were in one
+    if was_in_conversation:
+        return ConversationHandler.END
+    return None
+
+async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle conversation timeout"""
+    logger.info("Conversation timed out")
+    context.user_data['in_conversation'] = False
+    return ConversationHandler.END
+
+async def conversation_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle conversation stop"""
+    logger.info("Conversation stopped")
+    context.user_data['in_conversation'] = False
+    return ConversationHandler.END
+
 def main():
     """Start the bot."""
     print("🤖 Starting SMPanel Bot initialization...")
@@ -253,7 +356,16 @@ def main():
     # Create the Application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Add conversation handler for panel management - this must be first
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start))
+    
+    # *** FIRST PRIORITY HANDLERS ***
+    # Add special message handlers for back buttons - HIGHEST PRIORITY
+    application.add_handler(MessageHandler(filters.Regex("^🔙 بازگشت به منوی اصلی$"), handle_back_to_main), group=0)
+    application.add_handler(MessageHandler(filters.Regex("^🔙 بازگشت به بخش مدیریت$"), handle_back_to_admin), group=0)
+    
+    # *** SECOND PRIORITY HANDLERS ***
+    # Add conversation handlers
     add_panel_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🖥 اضافه کردن پنل$"), add_panel_scene.start_scene)],
         states={
@@ -267,11 +379,11 @@ def main():
         name="add_panel_conversation",
         persistent=False
     )
-    application.add_handler(add_panel_conv_handler)
+    application.add_handler(add_panel_conv_handler, group=1)
     
     # Add conversation handler for category management
     add_category_conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^.+اضافه کردن دسته بندی$"), add_category_scene.start_scene)],
+        entry_points=[MessageHandler(filters.Regex("^🛒 اضافه کردن دسته بندی$"), add_category_scene.start_scene)],
         states={
             ADD_CATEGORY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_category_scene.category_name)],
             ADD_SELECT_PANELS: [CallbackQueryHandler(add_category_scene.select_panels)],
@@ -283,7 +395,7 @@ def main():
         persistent=False
     )
     logger.info("Registering add_category_conv_handler with states: %s", add_category_conv_handler.states)
-    application.add_handler(add_category_conv_handler)
+    application.add_handler(add_category_conv_handler, group=1)
     
     # Add conversation handler for product management
     add_product_conv_handler = ConversationHandler(
@@ -301,7 +413,7 @@ def main():
         persistent=False
     )
     logger.info("Registering add_product_conv_handler")
-    application.add_handler(add_product_conv_handler)
+    application.add_handler(add_product_conv_handler, group=1)
     
     # Add conversation handler for delete category
     delete_category_conv_handler = ConversationHandler(
@@ -315,7 +427,7 @@ def main():
         persistent=False
     )
     logger.info("Registering delete_category_conv_handler")
-    application.add_handler(delete_category_conv_handler)
+    application.add_handler(delete_category_conv_handler, group=1)
     
     # Add conversation handler for delete product
     delete_product_conv_handler = ConversationHandler(
@@ -326,19 +438,19 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", delete_product_scene.cancel)],
         name="delete_product_conversation",
+        conversation_timeout=300,  # 5 minute timeout
         persistent=False
     )
     logger.info("Registering delete_product_conv_handler")
-    application.add_handler(delete_product_conv_handler)
+    application.add_handler(delete_product_conv_handler, group=1)
     
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start))
-    
+    # *** THIRD PRIORITY HANDLERS ***
     # Add callback query handler for inline buttons
-    application.add_handler(CallbackQueryHandler(handle_callback_query))
+    application.add_handler(CallbackQueryHandler(handle_callback_query), group=2)
     
+    # *** LOWEST PRIORITY HANDLER ***
     # Add message handler for menu navigation - this must be last
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_navigation))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_navigation), group=3)
     
     # Register error handler
     application.add_error_handler(error_handler)

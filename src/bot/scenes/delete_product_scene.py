@@ -51,6 +51,7 @@ class DeleteProductScene:
         context.user_data['in_conversation'] = True
         context.user_data['selected_products'] = []
         logger.info(f"Starting delete_product scene for user {update.effective_user.id}")
+        logger.info(f"Setting in_conversation to True")
         
         # Get all products
         products = self.shop_service.get_all_products()
@@ -114,6 +115,16 @@ class DeleteProductScene:
         query = update.callback_query
         await query.answer()
         
+        # بررسی کن که آیا هنوز در گفتگو هستیم
+        if not context.user_data.get('in_conversation', False):
+            # کاربر از طریق دکمه‌های فیزیکی از گفتگو خارج شده است
+            try:
+                await query.edit_message_text("⚠️ عملیات لغو شده است.")
+            except Exception:
+                # ممکن است پیام قبلاً ویرایش شده باشد
+                pass
+            return ConversationHandler.END
+            
         callback_data = query.data
         
         if callback_data == "back":
@@ -210,6 +221,16 @@ class DeleteProductScene:
         """Handle delete confirmation"""
         query = update.callback_query
         await query.answer()
+        
+        # بررسی کن که آیا هنوز در گفتگو هستیم
+        if not context.user_data.get('in_conversation', False):
+            # کاربر از طریق دکمه‌های فیزیکی از گفتگو خارج شده است
+            try:
+                await query.edit_message_text("⚠️ عملیات لغو شده است.")
+            except Exception:
+                # ممکن است پیام قبلاً ویرایش شده باشد
+                pass
+            return ConversationHandler.END
         
         callback_data = query.data
         

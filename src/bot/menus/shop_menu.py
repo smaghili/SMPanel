@@ -35,7 +35,10 @@ class ShopMenu(BaseMenu):
 
     async def add_category(self, update, context):
         """Handle add category request"""
-        await update.message.reply_text("🚧 بخش اضافه کردن دسته بندی در حال توسعه است...")
+        # Import here to avoid circular import
+        from src.bot.scenes.add_category_scene import AddCategoryScene
+        add_category_scene = AddCategoryScene()
+        return await add_category_scene.start_scene(update, context)
 
     async def delete_category(self, update, context):
         """Handle delete category request"""
