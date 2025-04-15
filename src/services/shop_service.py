@@ -571,4 +571,105 @@ class ShopService:
             
         except mysql.connector.Error as e:
             logger.error(f"Database error in get_uncategorized_products: {e}")
-            return [] 
+            return []
+            
+    def get_product_by_id(self, product_id):
+        """Get a product by its ID
+        
+        Args:
+            product_id (int): Product ID
+            
+        Returns:
+            dict: Product dictionary with category information or None if not found
+        """
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            query = """
+                SELECT p.*, IFNULL(c.name, 'بدون دسته‌بندی') as category_name
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE p.id = %s
+            """
+            cursor.execute(query, (product_id,))
+            
+            product = cursor.fetchone()
+            
+            cursor.close()
+            conn.close()
+            
+            return product
+            
+        except mysql.connector.Error as e:
+            logger.error(f"Database error in get_product_by_id: {e}")
+            return None
+            
+    def update_product(self, product_id, name, data_limit, price, category_id, duration, users_limit=1):
+        """Update a product in the database
+        
+        Args:
+            product_id (int): ID of the product to update
+            name (str): New product name
+            data_limit (int): New data limit in GB (0 for unlimited)
+            price (float): New product price
+            category_id (int): New category ID
+            duration (int): New duration in days (0 for unlimited)
+            users_limit (int, optional): New number of users allowed. Defaults to 1.
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # اطمینان از تبدیل صحیح پارامترها
+            try:
+                data_limit = int(data_limit) if data_limit is not None else 0
+                price = float(price) if price is not None else 0
+                
+                # اگر category_id خالی است، به NULL تبدیل کنیم
+                if category_id and category_id != '':
+                    category_id = int(category_id)
+                else:
+                    category_id = None
+                    
+                duration = int(duration) if duration is not None else 0
+                users_limit = int(users_limit) if users_limit is not None else 1
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error converting parameters in update_product: {e}")
+                raise ValueError(f"خطا در تبدیل پارامترها: {e}")
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Update product
+            query = """
+                UPDATE products 
+                SET name = %s, data_limit = %s, price = %s, category_id = %s, duration = %s, users_limit = %s
+                WHERE id = %s
+            """
+            values = (name, data_limit, price, category_id, duration, users_limit, product_id)
+            
+            logger.info(f"Updating product {product_id} with values: {values}")
+            
+            cursor.execute(query, values)
+            conn.commit()
+            
+            affected_rows = cursor.rowcount
+            
+            cursor.close()
+            conn.close()
+            
+            return affected_rows > 0
+            
+        except mysql.connector.Error as e:
+            logger.error(f"Database error in update_product: {e}")
+            # بررسی نوع خطا برای ارائه پیام مناسب به کاربر
+            if e.errno == 1452:  # Foreign key constraint fails
+                raise ValueError("دسته‌بندی انتخاب شده وجود ندارد")
+            else:
+                raise ValueError(f"خطا در ارتباط با پایگاه داده: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error in update_product: {e}")
+            import traceback
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            raise ValueError(f"خطای غیرمنتظره: {e}") 

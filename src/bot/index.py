@@ -51,12 +51,26 @@ from src.bot.scenes.delete_product_scene import (
     CONFIRM_DELETE as PRODUCT_CONFIRM_DELETE
 )
 
+# Import edit product scene states
+from src.bot.scenes.edit_product_scene import (
+    SELECT_CATEGORY as EDIT_PRODUCT_SELECT_CATEGORY,
+    SELECT_PRODUCT,
+    EDIT_OPTIONS,
+    EDIT_NAME,
+    EDIT_CATEGORY,
+    EDIT_DATA_LIMIT,
+    EDIT_DURATION,
+    EDIT_PRICE,
+    CONFIRMATION as EDIT_PRODUCT_CONFIRMATION
+)
+
 # Import modules
 from src.bot.scenes.add_panel_scene import AddPanelScene
 from src.bot.scenes.add_category_scene import AddCategoryScene
 from src.bot.scenes.add_product_scene import AddProductScene
 from src.bot.scenes.delete_category_scene import DeleteCategoryScene
 from src.bot.scenes.delete_product_scene import DeleteProductScene
+from src.bot.scenes.edit_product_scene import EditProductScene
 from src.bot.middlewares.admin_middleware import AdminMiddleware
 from src.bot.menus.main_menu import MainMenu
 from src.bot.menus.admin_menu import AdminMenu
@@ -87,6 +101,7 @@ add_category_scene = AddCategoryScene()
 add_product_scene = AddProductScene()
 delete_category_scene = DeleteCategoryScene()
 delete_product_scene = DeleteProductScene()
+edit_product_scene = EditProductScene()
 admin_middleware = AdminMiddleware()
 main_menu = MainMenu()
 admin_menu = AdminMenu()
@@ -181,7 +196,8 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
                 "❌ حذف محصول",
                 "🛍️ اضافه کردن محصول",
                 "❌ حذف دسته بندی",
-                "🛒 اضافه کردن دسته بندی"
+                "🛒 اضافه کردن دسته بندی",
+                "✏️ ویرایش محصول"
             ]
             
             if message_text in conversation_handled_options:
@@ -191,8 +207,6 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
                 return
             
             # Handle other shop menu options
-            if message_text == "✏️ ویرایش محصول":
-                await shop_menu.edit_product(update, context)
             elif message_text == "➕ تنظیم قیمت حجم اضافه":
                 await shop_menu.set_volume_price(update, context)
             elif message_text == "🎁 ساخت کد هدیه":
@@ -467,6 +481,27 @@ def main():
     )
     logger.info("Registering delete_product_conv_handler")
     application.add_handler(delete_product_conv_handler, group=1)
+    
+    # Add conversation handler for edit product
+    edit_product_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^✏️ ویرایش محصول$"), edit_product_scene.start_scene)],
+        states={
+            EDIT_PRODUCT_SELECT_CATEGORY: [CallbackQueryHandler(edit_product_scene.select_category)],
+            SELECT_PRODUCT: [CallbackQueryHandler(edit_product_scene.select_product)],
+            EDIT_OPTIONS: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_scene.handle_edit_options)],
+            EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_scene.edit_name)],
+            EDIT_CATEGORY: [CallbackQueryHandler(edit_product_scene.edit_category)],
+            EDIT_DATA_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_scene.edit_data_limit)],
+            EDIT_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_scene.edit_duration)],
+            EDIT_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_scene.edit_price)],
+        },
+        fallbacks=[CommandHandler("cancel", edit_product_scene.cancel)],
+        name="edit_product_conversation",
+        conversation_timeout=300,  # 5 minute timeout
+        persistent=False
+    )
+    logger.info("Registering edit_product_conv_handler")
+    application.add_handler(edit_product_conv_handler, group=1)
     
     # *** THIRD PRIORITY HANDLERS ***
     # Add callback query handler for inline buttons

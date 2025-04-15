@@ -49,7 +49,10 @@ class ShopMenu(BaseMenu):
 
     async def edit_product(self, update, context):
         """Handle edit product request"""
-        await update.message.reply_text("🚧 بخش ویرایش محصول در حال توسعه است...")
+        # Import here to avoid circular import
+        from src.bot.scenes.edit_product_scene import EditProductScene
+        edit_product_scene = EditProductScene()
+        return await edit_product_scene.start_scene(update, context)
 
     async def set_volume_price(self, update, context):
         """Handle set volume price request"""
