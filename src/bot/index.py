@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 import re
 import traceback
+import datetime
+import asyncio
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -60,6 +62,7 @@ from src.bot.menus.main_menu import MainMenu
 from src.bot.menus.admin_menu import AdminMenu
 from src.bot.menus.panel_management_menu import PanelManagementMenu
 from src.bot.menus.shop_menu import ShopMenu
+from src.bot.utils.navigation_helpers import handle_back_to_menu
 
 # Load environment variables
 load_dotenv()
@@ -103,33 +106,26 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
         message_text = update.message.text
         user_id = update.effective_user.id
         
-        # همیشه درخواست‌های بازگشت را بررسی کن، حتی در حالت مکالمه
-        if message_text == "🔙 بازگشت به منوی اصلی":
-            # لغو هر نوع مکالمه و بازگشت به منوی اصلی
-            context.user_data['in_conversation'] = False
-            # پاکسازی هر گونه داده موقتی
-            for key in list(context.user_data.keys()):
-                if key.startswith('selected_'):
-                    del context.user_data[key]
-            user_states[user_id] = "main"
-            await main_menu.show(update, context)
+        # بررسی دکمه "بازگشت به منوی مدیریت" در حالت shop به صورت ویژه
+        if message_text == "🔙 بازگشت به منوی مدیریت":
+            current_state = user_states.get(user_id, "main")
+            if current_state == "shop":
+                logger.info(f"Handling back to admin menu from shop menu")
+                user_states[user_id] = "admin"
+                await admin_menu.show(update, context)
+                return
+        
+        # Skip back commands in other contexts
+        if message_text in ["🔙 بازگشت به منوی اصلی", "🔙 بازگشت به بخش مدیریت"]:
+            logger.debug(f"Skipping back command '{message_text}' in handle_menu_navigation")
             return
         
-        elif message_text == "🔙 بازگشت به بخش مدیریت":
-            # لغو هر نوع مکالمه و بازگشت به منوی مدیریت
-            was_in_conversation = context.user_data.get('in_conversation', False)
-            context.user_data['in_conversation'] = False
-            # پاکسازی هر گونه داده موقتی
-            for key in list(context.user_data.keys()):
-                if key.startswith('selected_'):
-                    del context.user_data[key]
-            user_states[user_id] = "admin"
-            
-            # نمایش پیام لغو اگر در مکالمه بودیم
-            if was_in_conversation:
-                await update.message.reply_text("❌ عملیات لغو شد.")
-                
-            await admin_menu.show(update, context)
+        # پشتیبانی از 'بازگشت به بخش فروشگاه'
+        elif message_text == "🔙 بازگشت به بخش فروشگاه":
+            # این دکمه احتمالاً اشتباه است و باید به منوی فروشگاه برگردد
+            logger.info(f"Handling back to shop menu from message '{message_text}'")
+            user_states[user_id] = "shop"
+            await shop_menu.show(update, context)
             return
             
         # Skip other processing if we're in a conversation
@@ -141,6 +137,19 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
         current_state = user_states.get(user_id, "main")
         logger.info(f"User {user_id} in state '{current_state}' sent message: '{message_text}' (hex: {message_text.encode('utf-8').hex()})")
         
+        # پیام‌هایی که توسط ConversationHandler پردازش می‌شوند را رد کن
+        conversation_handled_messages = [
+            "🖥 اضافه کردن پنل",
+            "🛒 اضافه کردن دسته بندی",
+            "🛍️ اضافه کردن محصول",
+            "❌ حذف دسته بندی",
+            "❌ حذف محصول"
+        ]
+        
+        if message_text in conversation_handled_messages:
+            logger.debug(f"Message '{message_text}' will be handled by a ConversationHandler, skipping")
+            return
+        
         if message_text == "مدیریت":
             if admin_middleware.is_admin(user_id):
                 # Set user state to admin menu
@@ -148,13 +157,6 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
                 await admin_menu.show(update, context)
             else:
                 await update.message.reply_text("⛔ شما دسترسی به این بخش را ندارید.")
-        
-        elif message_text == "🖥 اضافه کردن پنل":
-            if admin_middleware.is_admin(user_id):
-                # Set user state to add panel
-                user_states[user_id] = "add_panel"
-                context.user_data['in_conversation'] = True
-                return await add_panel_scene.start_scene(update, context)
         
         elif message_text == "👥 مدیریت پنل":
             if admin_middleware.is_admin(user_id):
@@ -221,6 +223,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer("⛔ شما دسترسی به این بخش را ندارید.")
         return
     
+    # اگر کاربر در یک مکالمه است (مثلاً افزودن دسته‌بندی)، پردازش نکن
+    # ConversationHandler باید اول پردازش کند
+    if context.user_data.get('in_conversation', False):
+        logger.info(f"Skipping handle_callback_query for user {user_id} because they are in a conversation")
+        await query.answer()
+        return
+        
     # Answer the callback query to stop loading animation
     await query.answer()
     
@@ -240,9 +249,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "برای بازگشت به منوی مدیریت، لطفاً از دکمه‌های زیر استفاده کنید."
         )
     
+    # پشتیبانی از panel_type
+    elif callback_data.startswith("panel_type_"):
+        # مستقیم به add_panel_scene ارجاع دهیم تا توسط کد اصلی آن پردازش شود
+        try:
+            return await add_panel_scene.panel_type(update, context)
+        except Exception as e:
+            logger.error(f"Error handling panel_type: {e}")
+            await query.edit_message_text("❌ خطایی در پردازش نوع پنل رخ داد. لطفاً دوباره تلاش کنید.")
+    
     # Handle pattern matches after exact matches
     # Handle panel selection
-    elif callback_data.startswith("panel_"):
+    elif callback_data.startswith("panel_") and len(callback_data.split("_")) >= 2 and callback_data.split("_")[1].isdigit():
         panel_id = int(callback_data.split("_")[1])
         await panel_management_menu.show_panel_options(update, context, panel_id)
     
@@ -281,61 +299,25 @@ async def error_handler(update, context):
 
 async def handle_back_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle back to admin menu request in conversations"""
-    logger.info("Handling back to admin in conversation fallbacks")
-    
-    # Reset conversation state and clean up data
-    was_in_conversation = context.user_data.get('in_conversation', False)
-    context.user_data['in_conversation'] = False
-    
-    # Clean up any temporary data
-    for key in list(context.user_data.keys()):
-        if key.startswith('selected_'):
-            del context.user_data[key]
-    
-    # Update user state
-    user_id = update.effective_user.id
-    user_states[user_id] = "admin"
-    
-    # Show cancellation message if we were in conversation
-    if was_in_conversation:
-        await update.message.reply_text("❌ عملیات لغو شد.")
-    
-    # Show admin menu
-    await admin_menu.show(update, context)
-    
-    # End conversation if we were in one
-    if was_in_conversation:
-        return ConversationHandler.END
-    return None
+    return await handle_back_to_menu(
+        update=update,
+        context=context,
+        menu_callback=admin_menu.show,
+        menu_name="admin",
+        target_state="admin",
+        user_states_dict=user_states
+    )
 
 async def handle_back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle back to main menu request in conversations"""
-    logger.info("Handling back to main in conversation fallbacks")
-    
-    # Reset conversation state and clean up data
-    was_in_conversation = context.user_data.get('in_conversation', False)
-    context.user_data['in_conversation'] = False
-    
-    # Clean up any temporary data
-    for key in list(context.user_data.keys()):
-        if key.startswith('selected_'):
-            del context.user_data[key]
-    
-    # Update user state
-    user_id = update.effective_user.id
-    user_states[user_id] = "main"
-    
-    # Show cancellation message if we were in conversation
-    if was_in_conversation:
-        await update.message.reply_text("❌ عملیات لغو شد.")
-    
-    # Show main menu
-    await main_menu.show(update, context)
-    
-    # End conversation if we were in one
-    if was_in_conversation:
-        return ConversationHandler.END
-    return None
+    return await handle_back_to_menu(
+        update=update,
+        context=context,
+        menu_callback=main_menu.show,
+        menu_name="main",
+        target_state="main",
+        user_states_dict=user_states
+    )
 
 async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle conversation timeout"""
@@ -349,6 +331,43 @@ async def conversation_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['in_conversation'] = False
     return ConversationHandler.END
 
+async def send_admin_notification(application):
+    """Send notification to admin users when bot starts"""
+    # You can get admin user IDs from a config file or database
+    # Here we're using a hard-coded admin ID for simplicity
+    admin_ids = []
+    
+    # Get admin IDs from middleware
+    try:
+        admins = AdminMiddleware().get_admin_list()
+        admin_ids = admins
+    except Exception as e:
+        logger.error(f"Error getting admin IDs: {e}")
+    
+    # Fallback if no admins found
+    if not admin_ids:
+        logger.warning("No admin IDs found, notification won't be sent")
+        return
+    
+    try:
+        # Send notification to all admins
+        bot_info = await application.bot.get_me()
+        bot_username = bot_info.username
+        message = (
+            f"✅ Bot @{bot_username} started successfully!\n"
+            f"Mode: {'Webhook' if os.getenv('WEBHOOK_URL') else 'Polling'}\n"
+            f"Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
+        for admin_id in admin_ids:
+            try:
+                await application.bot.send_message(chat_id=admin_id, text=message)
+                logger.info(f"Start notification sent to admin {admin_id}")
+            except Exception as e:
+                logger.error(f"Failed to send notification to admin {admin_id}: {e}")
+    except Exception as e:
+        logger.error(f"Error sending admin notifications: {e}")
+
 def main():
     """Start the bot."""
     print("🤖 Starting SMPanel Bot initialization...")
@@ -361,8 +380,13 @@ def main():
     
     # *** FIRST PRIORITY HANDLERS ***
     # Add special message handlers for back buttons - HIGHEST PRIORITY
-    application.add_handler(MessageHandler(filters.Regex("^🔙 بازگشت به منوی اصلی$"), handle_back_to_main), group=0)
-    application.add_handler(MessageHandler(filters.Regex("^🔙 بازگشت به بخش مدیریت$"), handle_back_to_admin), group=0)
+    # استفاده از فیلترهای دقیق‌تر برای جلوگیری از چندین بار پردازش یک پیام
+    back_to_main_filter = filters.Regex("^🔙 بازگشت به منوی اصلی$") & ~filters.UpdateType.EDITED_MESSAGE
+    back_to_admin_filter = filters.Regex("^🔙 بازگشت به منوی مدیریت$") & ~filters.UpdateType.EDITED_MESSAGE
+    
+    # تعداد handler های اضافی را کاهش می‌دهیم
+    application.add_handler(MessageHandler(back_to_main_filter, handle_back_to_main, block=True), group=0)
+    application.add_handler(MessageHandler(back_to_admin_filter, handle_back_to_admin, block=True), group=0)
     
     # *** SECOND PRIORITY HANDLERS ***
     # Add conversation handlers
@@ -457,8 +481,56 @@ def main():
     
     # Start the Bot
     print("✅ Bot initialized successfully!")
-    print("🚀 Starting bot polling...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    # Get webhook info from environment
+    WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+    WEBHOOK_PATH = os.getenv('WEBHOOK_PATH', '/webhook')
+    SERVER_PORT = int(os.getenv('SERVER_PORT', '8443'))
+    
+    # Run as a synchronous function so the event loop works properly
+    async def start_webhook_async():
+        # Send admin notification
+        await send_admin_notification(application)
+        
+        # Start the webhook
+        await application.initialize()
+        await application.start()
+        await application.updater.start_webhook(
+            listen="0.0.0.0",
+            port=SERVER_PORT,
+            url_path=f"{WEBHOOK_PATH}/{TELEGRAM_BOT_TOKEN}",
+            webhook_url=f"{WEBHOOK_URL}{WEBHOOK_PATH}/{TELEGRAM_BOT_TOKEN}",
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES
+        )
+        
+        # Keep the application running - اصلاح روش نگه داشتن اپلیکیشن
+        while True:
+            # اجازه دهیم اپلیکیشن به کار خود ادامه دهد
+            await asyncio.sleep(3600)  # انتظار 1 ساعت - این فقط برای نگه داشتن برنامه است
+    
+    async def start_polling_async():
+        # Send admin notification
+        await send_admin_notification(application)
+        
+        # Start polling
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        
+        # Keep the application running - اصلاح روش نگه داشتن اپلیکیشن
+        while True:
+            # اجازه دهیم اپلیکیشن به کار خود ادامه دهد
+            await asyncio.sleep(3600)  # انتظار 1 ساعت - این فقط برای نگه داشتن برنامه است
+    
+    if WEBHOOK_URL:
+        # Start in webhook mode
+        print(f"🚀 Starting bot with webhook at {WEBHOOK_URL}{WEBHOOK_PATH}/{TELEGRAM_BOT_TOKEN}")
+        asyncio.run(start_webhook_async())
+    else:
+        # Fallback to polling mode
+        print("🚀 Starting bot in polling mode...")
+        asyncio.run(start_polling_async())
 
 if __name__ == "__main__":
     main() 

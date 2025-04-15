@@ -103,9 +103,9 @@ class AddPanelScene:
         # Save panel type
         context.user_data['panel_type'] = panel_type
         
-        # Display message based on panel type
+        # متن پیام متناسب با نوع پنل
         if panel_type == '3x-ui':
-            await query.edit_message_text(
+            message_text = (
                 f"🔧 نوع پنل انتخاب شده: {panel_type}\n\n"
                 f"🔗 حالا آدرس پنل خود را ارسال کنید.\n"
                 f"⚠️ توجه:\n"
@@ -114,7 +114,7 @@ class AddPanelScene:
                 f"🔹 در صورت وارد کردن آیپی، حتما http یا https باید داشته باشد."
             )
         else:
-            await query.edit_message_text(
+            message_text = (
                 f"🔧 نوع پنل انتخاب شده: {panel_type}\n\n"
                 f"🔗 حالا آدرس پنل خود را ارسال کنید.\n"
                 f"⚠️ توجه:\n"
@@ -123,6 +123,16 @@ class AddPanelScene:
                 f"🔸 آخر آدرس نباید / داشته باشد.\n"
                 f"🔹 در صورت وارد کردن آیپی، حتما http یا https باید داشته باشد."
             )
+        
+        # فقط یک بار پیام را ارسال می‌کنیم و از پیام‌های تکراری جلوگیری می‌کنیم
+        try:
+            # ویرایش پیام فعلی
+            await query.edit_message_text(message_text)
+        except Exception as e:
+            # اگر خطا به دلیل "Message is not modified" بود، کاری انجام نمی‌دهیم
+            # چون پیام قبلاً با همین محتوا بروزرسانی شده است
+            if "Message is not modified" not in str(e):
+                logger.error(f"Error in panel_type: {e}")
         
         return PANEL_URL
     

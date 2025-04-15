@@ -5,7 +5,7 @@ DATABASE = {
     'host': 'localhost',
     'database': 'smpanel',
     'user': 'smpanel_2qY3HNjT',
-    'password': 'HHM6vG53AmIgwE7i'
+    'password': 'ZIlykxKcCdzd8Xzj'
 }
 
 # Telegram Bot settings

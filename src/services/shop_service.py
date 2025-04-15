@@ -491,6 +491,23 @@ class ShopService:
             int: ID of the new product
         """
         try:
+            # اطمینان از تبدیل صحیح پارامترها
+            try:
+                data_limit = int(data_limit) if data_limit is not None else 0
+                price = float(price) if price is not None else 0
+                
+                # اگر category_id خالی است، به NULL تبدیل کنیم
+                if category_id and category_id != '':
+                    category_id = int(category_id)
+                else:
+                    category_id = None
+                    
+                duration = int(duration) if duration is not None else 0
+                users_limit = int(users_limit) if users_limit is not None else 1
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error converting parameters in add_product: {e}")
+                raise ValueError(f"خطا در تبدیل پارامترها: {e}")
+            
             conn = get_db_connection()
             cursor = conn.cursor()
             
@@ -500,6 +517,8 @@ class ShopService:
                 VALUES (%s, %s, %s, %s, %s, %s, 'active')
             """
             values = (name, data_limit, price, category_id, duration, users_limit)
+            
+            logger.info(f"Adding product with values: {values}")
             
             cursor.execute(query, values)
             conn.commit()
@@ -514,7 +533,17 @@ class ShopService:
             
         except mysql.connector.Error as e:
             logger.error(f"Database error in add_product: {e}")
-            raise
+            # بررسی نوع خطا برای ارائه پیام مناسب به کاربر
+            if e.errno == 1452:  # Foreign key constraint fails
+                raise ValueError("دسته‌بندی انتخاب شده وجود ندارد")
+            elif e.errno == 1062:  # Duplicate entry
+                raise ValueError("محصول با این نام قبلاً ثبت شده است")
+            else:
+                raise ValueError(f"خطا در ارتباط با پایگاه داده: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error in add_product: {e}")
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            raise ValueError(f"خطای غیرمنتظره: {e}")
     
     def get_uncategorized_products(self):
         """Get all products without a category

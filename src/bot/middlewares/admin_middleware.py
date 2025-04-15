@@ -11,4 +11,8 @@ class AdminMiddleware:
     
     def is_admin(self, user_id):
         """Check if user is admin"""
-        return user_id == self.admin_id 
+        return user_id == self.admin_id
+        
+    def get_admin_list(self):
+        """Get list of admin IDs"""
+        return [self.admin_id] 

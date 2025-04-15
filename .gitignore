@@ -54,4 +54,8 @@ logs/
 *.swp
 *.swo
 *~
-.DS_Store 
+.DS_Store
+
+# Process IDs and temporary files
+*.pid
+lt_output.txt 

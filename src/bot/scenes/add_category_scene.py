@@ -8,7 +8,8 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    filters
+    filters,
+    CallbackContext
 )
 import logging
 import traceback
@@ -17,6 +18,7 @@ from src.services.shop_service import ShopService
 from src.bot.menus.shop_menu import ShopMenu
 from src.bot.menus.admin_menu import AdminMenu
 from src.bot.menus.add_category_menu import AddCategoryMenu
+from src.bot.utils.keyboard_helpers import create_checkbox_keyboard, create_grouped_inbound_keyboard
 
 # Setup logging
 logging.basicConfig(
@@ -77,76 +79,69 @@ class AddCategoryScene:
     
     async def category_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle category name entry"""
+        category_name = update.message.text
+        
+        # Check if user is trying to go back
+        if category_name == "🔙 بازگشت به بخش مدیریت":
+            # Reset conversation flag
+            context.user_data['in_conversation'] = False
+            # Go back to shop menu
+            await self.shop_menu.show(update, context)
+            return ConversationHandler.END
+        
+        # Check if name is too short
+        if len(category_name) < 2:
+            await update.message.reply_text(
+                "❌ نام دسته بندی باید حداقل 2 کاراکتر باشد."
+            )
+            return ADD_CATEGORY_NAME
+        
+        # Store category name
+        context.user_data['category_name'] = category_name
+        
+        # اطمینان از مقداردهی اولیه selected_panels
+        context.user_data['selected_panels'] = []
+        context.user_data['selected_inbounds'] = []
+        
         try:
-            category_name = update.message.text
-            logger.info(f"Received category name: '{category_name}' from user {update.effective_user.id}")
-            
-            # Check if user is trying to go back
-            if category_name == "🔙 بازگشت به بخش فروشگاه":
-                context.user_data['in_conversation'] = False
-                await update.message.reply_text("❌ عملیات لغو شد.")
-                await self.shop_menu.show(update, context)
-                return ConversationHandler.END
-            
-            # Show processing message to let user know we're working on it
-            processing_message = await update.message.reply_text("⏳ در حال پردازش...")
-            
-            # Save category name in user data
-            context.user_data['category_name'] = category_name
-            
             # Get all panels
-            logger.info("Fetching panels for selection...")
             panels = self.shop_service.get_all_panels()
-            logger.info(f"Fetched panels: {panels}")
             
-            if not panels or len(panels) == 0:
-                logger.warning("No panels found!")
-                await processing_message.edit_text("❌ هیچ پنلی یافت نشد. ابتدا یک پنل اضافه کنید.")
+            if not panels:
+                await update.message.reply_text(
+                    "❌ هیچ پنلی یافت نشد. ابتدا باید حداقل یک پنل اضافه کنید."
+                )
                 context.user_data['in_conversation'] = False
                 await self.shop_menu.show(update, context)
                 return ConversationHandler.END
             
-            # Create inline keyboard with panels
+            # Create keyboard with panels
             keyboard = []
+            
             for panel in panels:
-                # Safely get panel ID and name with fallbacks
-                panel_id = panel.get('id', 0)
-                panel_name = panel.get('name', 'بدون نام')
-                logger.info(f"Adding panel to keyboard: ID={panel_id}, Name={panel_name}")
-                
-                checkbox = "☑️" if panel_id in context.user_data['selected_panels'] else "⬜️"
+                # Use ⬜️ for unselected panels initially
                 keyboard.append([
-                    InlineKeyboardButton(f"{checkbox} {panel_name}", callback_data=f"panel_{panel_id}")
+                    InlineKeyboardButton(f"⬜️ {panel['name']}", callback_data=f"panel_{panel['id']}")
                 ])
             
-            # Add confirm button at the bottom
+            # Add confirmation button
             keyboard.append([InlineKeyboardButton("✅ تایید پنل ها", callback_data="confirm_panels")])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            # Remove processing message and send the actual selection keyboard
-            await processing_message.delete()
-            
-            try:
-                sent_message = await update.message.reply_text(
-                    "📌 پنل های مورد نظر را انتخاب کنید:\n"
-                    "می‌توانید چندین پنل را انتخاب کنید.",
-                    reply_markup=reply_markup
-                )
-                logger.info(f"Panel selection keyboard sent successfully: {sent_message.message_id}")
-                return ADD_SELECT_PANELS
-            except Exception as e:
-                logger.error(f"Error sending panel selection keyboard: {e}")
-                await update.message.reply_text(f"❌ خطا در نمایش پنل‌ها: {str(e)}")
-                context.user_data['in_conversation'] = False
-                await self.shop_menu.show(update, context)
-                return ConversationHandler.END
-        
-        except Exception as e:
-            logger.error(f"Error in category_name: {e}")
             await update.message.reply_text(
-                "❌ خطایی در پردازش نام دسته‌بندی رخ داد.\n"
-                "لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+                f"📌 انتخاب پنل‌ها برای دسته بندی «{category_name}»\n\n"
+                f"پنل های مورد نظر را انتخاب کنید:\n"
+                f"می‌توانید چندین پنل را انتخاب کنید.",
+                reply_markup=reply_markup
+            )
+            
+            return ADD_SELECT_PANELS
+            
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ خطا: {str(e)}\n"
+                f"لطفاً دوباره تلاش کنید."
             )
             # Log detailed error
             logger.error(traceback.format_exc())
@@ -165,14 +160,18 @@ class AddCategoryScene:
         
         if callback_data == "confirm_panels":
             # User confirmed panel selection
-            if not context.user_data['selected_panels']:
+            if not context.user_data.get('selected_panels', []):
                 # No panels selected
                 await query.edit_message_text(
                     "❌ حداقل یک پنل باید انتخاب شود.\n"
                     "لطفاً دوباره تلاش کنید."
                 )
                 return ConversationHandler.END
-            
+
+            # اطمینان از اینکه selected_panels وجود دارد
+            if 'selected_panels' not in context.user_data:
+                context.user_data['selected_panels'] = []
+                
             # Get available inbounds for selected panels
             panels = self.shop_service.get_all_panels()
             available_inbounds = {}
@@ -185,8 +184,11 @@ class AddCategoryScene:
                     inbounds = self.shop_service.get_panel_inbounds(panel)
                     if inbounds:
                         available_inbounds[panel['id']] = inbounds
+                    else:
+                        logger.warning(f"No inbounds found for panel {panel['id']} ({panel['name']})")
             
             if not available_inbounds:
+                logger.warning(f"No available inbounds found for selected panels: {context.user_data['selected_panels']}")
                 await query.edit_message_text(
                     "❌ هیچ اینباندی در پنل‌های انتخاب شده یافت نشد.\n"
                     "لطفاً پنل‌های دیگری انتخاب کنید یا اینباندها را در پنل بررسی کنید."
@@ -196,36 +198,15 @@ class AddCategoryScene:
             # Save available inbounds for later use
             context.user_data['available_inbounds'] = available_inbounds
             
-            # Create keyboard for inbound selection
-            keyboard = []
-            
-            # Group inbounds by panel
-            for panel_id, inbounds in available_inbounds.items():
-                panel_name = next((p['name'] for p in panels if p['id'] == panel_id), "پنل")
+            # ساخت کیبورد اینباندها با استفاده از تابع کمکی
+            if 'selected_inbounds' not in context.user_data:
+                context.user_data['selected_inbounds'] = []
                 
-                # Add panel name as header
-                keyboard.append([InlineKeyboardButton(f"📌 {panel_name}", callback_data=f"panel_header_{panel_id}")])
-                
-                # Add inbounds for this panel
-                for inbound in inbounds:
-                    port = inbound.get('port', 'نامشخص')
-                    protocol = inbound.get('protocol', 'نامشخص')
-                    remark = inbound.get('remark', 'بدون توضیحات')
-                    
-                    inbound_key = f"{panel_id}_{inbound.get('id', '0')}"
-                    checkbox = "☑️" if inbound_key in context.user_data['selected_inbounds'] else "⬜️"
-                    
-                    keyboard.append([
-                        InlineKeyboardButton(
-                            f"{checkbox} پورت: {port} | {protocol} | {remark}", 
-                            callback_data=f"inbound_{inbound_key}"
-                        )
-                    ])
-            
-            # Add confirm button
-            keyboard.append([InlineKeyboardButton("✅ تایید اینباند ها", callback_data="confirm_inbounds")])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = create_grouped_inbound_keyboard(
+                panel_inbounds_dict=available_inbounds,
+                panel_dict=panels,
+                selected_inbounds=context.user_data.get('selected_inbounds', [])
+            )
             
             await query.edit_message_text(
                 f"📌 انتخاب اینباندها برای دسته بندی «{context.user_data['category_name']}»\n\n"
@@ -236,36 +217,59 @@ class AddCategoryScene:
             
             return ADD_SELECT_INBOUNDS
             
-        else:
+        # اضافه کردن شرط برای 'panel_list' برای جلوگیری از خطا
+        elif callback_data == "panel_list":
+            # کاربر دکمه برگشت به لیست پنل ها را زده است - به منوی اصلی برگردیم
+            await query.edit_message_text("عملیات انتخاب پنل لغو شد.")
+            # برگشت به منوی فروشگاه
+            await self.shop_menu.show(update, context)
+            return ConversationHandler.END
+            
+        elif callback_data.startswith("panel_"):
             # User selected/deselected a panel
-            panel_id = int(callback_data.split('_')[1])
-            
-            # Toggle panel selection
-            if panel_id in context.user_data['selected_panels']:
-                context.user_data['selected_panels'].remove(panel_id)
-            else:
-                context.user_data['selected_panels'].append(panel_id)
-            
-            # Update keyboard
-            panels = self.shop_service.get_all_panels()
-            keyboard = []
-            
-            for panel in panels:
-                checkbox = "☑️" if panel['id'] in context.user_data['selected_panels'] else "⬜️"
-                keyboard.append([
-                    InlineKeyboardButton(f"{checkbox} {panel['name']}", callback_data=f"panel_{panel['id']}")
-                ])
-            
-            keyboard.append([InlineKeyboardButton("✅ تایید پنل ها", callback_data="confirm_panels")])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_text(
-                "📌 پنل های مورد نظر را انتخاب کنید:\n"
-                "می‌توانید چندین پنل را انتخاب کنید.",
-                reply_markup=reply_markup
-            )
-            
+            try:
+                panel_id = int(callback_data.split('_')[1])
+                
+                # اطمینان از اینکه selected_panels وجود دارد
+                if 'selected_panels' not in context.user_data:
+                    context.user_data['selected_panels'] = []
+                
+                # Toggle panel selection
+                if panel_id in context.user_data['selected_panels']:
+                    context.user_data['selected_panels'].remove(panel_id)
+                    logger.info(f"Removed panel {panel_id} from selection, now have {context.user_data['selected_panels']}")
+                else:
+                    context.user_data['selected_panels'].append(panel_id)
+                    logger.info(f"Added panel {panel_id} to selection, now have {context.user_data['selected_panels']}")
+                
+                # استفاده از تابع کمکی برای ساخت کیبورد
+                panels = self.shop_service.get_all_panels()
+                
+                # تابع بررسی انتخاب پنل
+                is_panel_selected = lambda panel_id: panel_id in context.user_data['selected_panels']
+                
+                reply_markup = create_checkbox_keyboard(
+                    items=panels,
+                    is_selected_callback=is_panel_selected,
+                    item_callback_prefix="panel_",
+                    confirm_text="✅ تایید پنل ها",
+                    confirm_callback="confirm_panels"
+                )
+                
+                await query.edit_message_text(
+                    f"📌 انتخاب پنل‌ها برای دسته بندی «{context.user_data['category_name']}»\n\n"
+                    f"پنل های مورد نظر را انتخاب کنید:\n"
+                    f"می‌توانید چندین پنل را انتخاب کنید.",
+                    reply_markup=reply_markup
+                )
+                
+                return ADD_SELECT_PANELS
+            except ValueError as e:
+                logger.error(f"Error parsing panel_id from {callback_data}: {e}")
+                await query.edit_message_text("خطا در پردازش انتخاب پنل. لطفاً دوباره تلاش کنید.")
+                return ConversationHandler.END
+        else:
+            logger.warning(f"Unexpected callback_data: {callback_data} in select_panels")
             return ADD_SELECT_PANELS
     
     async def select_inbounds(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -341,7 +345,16 @@ class AddCategoryScene:
                 if 'available_inbounds' in context.user_data:
                     del context.user_data['available_inbounds']
                 
+                # Reset conversation flag
                 context.user_data['in_conversation'] = False
+                
+                # برگشت به منوی فروشگاه با استفاده از chat_id
+                chat_id = update.effective_chat.id
+                await self.shop_menu.show_with_chat_id(chat_id, context)
+                
+                # تنظیم وضعیت کاربر به "shop"
+                from src.bot.index import user_states
+                user_states[update.effective_user.id] = "shop"
                 
                 return ConversationHandler.END
                 
@@ -370,36 +383,12 @@ class AddCategoryScene:
             # Get panels for panel names
             panels = self.shop_service.get_all_panels()
             
-            # Create updated keyboard
-            keyboard = []
-            
-            # Add panel headers and inbounds
-            for panel_id, inbounds in context.user_data['available_inbounds'].items():
-                panel_name = next((p['name'] for p in panels if p['id'] == panel_id), "پنل")
-                
-                # Add panel name as header
-                keyboard.append([InlineKeyboardButton(f"📌 {panel_name}", callback_data=f"panel_header_{panel_id}")])
-                
-                # Add inbounds for this panel
-                for inbound in inbounds:
-                    port = inbound.get('port', 'نامشخص')
-                    protocol = inbound.get('protocol', 'نامشخص')
-                    remark = inbound.get('remark', 'بدون توضیحات')
-                    
-                    ib_key = f"{panel_id}_{inbound.get('id', '0')}"
-                    checkbox = "☑️" if ib_key in context.user_data['selected_inbounds'] else "⬜️"
-                    
-                    keyboard.append([
-                        InlineKeyboardButton(
-                            f"{checkbox} پورت: {port} | {protocol} | {remark}", 
-                            callback_data=f"inbound_{ib_key}"
-                        )
-                    ])
-            
-            # Add confirm button
-            keyboard.append([InlineKeyboardButton("✅ تایید اینباند ها", callback_data="confirm_inbounds")])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            # ساخت کیبورد با استفاده از تابع کمکی
+            reply_markup = create_grouped_inbound_keyboard(
+                panel_inbounds_dict=context.user_data['available_inbounds'],
+                panel_dict=panels,
+                selected_inbounds=context.user_data['selected_inbounds']
+            )
             
             # Get selected panel names for display
             selected_panel_names = [
@@ -438,7 +427,19 @@ class AddCategoryScene:
         # Reset conversation flag
         context.user_data['in_conversation'] = False
         
+        # نمایش پیام لغو
         await update.message.reply_text("❌ عملیات لغو شد.")
-        # Return to shop menu
-        await self.shop_menu.show(update, context)
+        
+        # بازگشت به منوی فروشگاه با استفاده از chat_id
+        chat_id = update.effective_chat.id
+        
+        # استفاده از تابع show_with_chat_id از BaseMenu با پارامترهای اضافی
+        await self.shop_menu.show_with_chat_id(
+            chat_id=chat_id, 
+            context=context,
+            user_id=update.effective_user.id,
+            user_states_dict=user_states,
+            target_state="shop"
+        )
+        
         return ConversationHandler.END 
