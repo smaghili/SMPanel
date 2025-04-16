@@ -46,10 +46,11 @@ from src.bot.scenes.delete_category_scene import (
     CONFIRM_DELETE as CATEGORY_CONFIRM_DELETE
 )
 
-from src.bot.scenes.delete_product_scene import (
-    SHOW_PRODUCTS,
-    CONFIRM_DELETE as PRODUCT_CONFIRM_DELETE
-)
+# Define states for product deletion
+(
+    SELECT_PRODUCT,
+    CONFIRM_DELETE
+) = range(2)
 
 # Import edit product scene states
 from src.bot.scenes.edit_product_scene import (
@@ -69,8 +70,16 @@ from src.bot.scenes.add_panel_scene import AddPanelScene
 from src.bot.scenes.add_category_scene import AddCategoryScene
 from src.bot.scenes.add_product_scene import AddProductScene
 from src.bot.scenes.delete_category_scene import DeleteCategoryScene
-from src.bot.scenes.delete_product_scene import DeleteProductScene
+from src.bot.scenes.delete_product_scene import DeleteProductScene, SELECT_CATEGORY as DELETE_PRODUCT_SELECT_CATEGORY, PRODUCT_CONFIRM_DELETE
 from src.bot.scenes.edit_product_scene import EditProductScene
+from src.bot.scenes.extra_volume_settings_scene import (
+    SELECT_CATEGORY as EVS_SELECT_CATEGORY,
+    SHOW_MENU as EVS_SHOW_MENU,
+    SET_PRICE as EVS_SET_PRICE,
+    SET_MIN_VOLUME as EVS_SET_MIN_VOLUME,
+    SET_MAX_VOLUME as EVS_SET_MAX_VOLUME
+)
+from src.bot.scenes.extra_volume_settings_scene import ExtraVolumeSettingsScene
 from src.bot.middlewares.admin_middleware import AdminMiddleware
 from src.bot.menus.main_menu import MainMenu
 from src.bot.menus.admin_menu import AdminMenu
@@ -102,6 +111,7 @@ add_product_scene = AddProductScene()
 delete_category_scene = DeleteCategoryScene()
 delete_product_scene = DeleteProductScene()
 edit_product_scene = EditProductScene()
+extra_volume_settings_scene = ExtraVolumeSettingsScene()
 admin_middleware = AdminMiddleware()
 main_menu = MainMenu()
 admin_menu = AdminMenu()
@@ -197,7 +207,8 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
                 "🛍️ اضافه کردن محصول",
                 "❌ حذف دسته بندی",
                 "🛒 اضافه کردن دسته بندی",
-                "✏️ ویرایش محصول"
+                "✏️ ویرایش محصول",
+                "➕ تنظیم قیمت حجم اضافه"
             ]
             
             if message_text in conversation_handled_options:
@@ -207,8 +218,6 @@ async def handle_menu_navigation(update: Update, context: ContextTypes.DEFAULT_T
                 return
             
             # Handle other shop menu options
-            elif message_text == "➕ تنظیم قیمت حجم اضافه":
-                await shop_menu.set_volume_price(update, context)
             elif message_text == "🎁 ساخت کد هدیه":
                 await shop_menu.create_gift_code(update, context)
             elif message_text == "❌ حذف کد هدیه":
@@ -467,20 +476,20 @@ def main():
     logger.info("Registering delete_category_conv_handler")
     application.add_handler(delete_category_conv_handler, group=1)
     
-    # Add conversation handler for delete product
-    delete_product_conv_handler = ConversationHandler(
+    # Delete product conversation
+    delete_product_scene = DeleteProductScene()
+    delete_product_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^❌ حذف محصول$"), delete_product_scene.start_scene)],
         states={
-            SHOW_PRODUCTS: [CallbackQueryHandler(delete_product_scene.handle_selection)],
+            DELETE_PRODUCT_SELECT_CATEGORY: [CallbackQueryHandler(delete_product_scene.handle_selection)],
+            SELECT_PRODUCT: [CallbackQueryHandler(delete_product_scene.handle_selection)],
             PRODUCT_CONFIRM_DELETE: [CallbackQueryHandler(delete_product_scene.handle_confirmation)],
         },
         fallbacks=[CommandHandler("cancel", delete_product_scene.cancel)],
-        name="delete_product_conversation",
-        conversation_timeout=300,  # 5 minute timeout
-        persistent=False
+        name="delete_product_conversation"
     )
     logger.info("Registering delete_product_conv_handler")
-    application.add_handler(delete_product_conv_handler, group=1)
+    application.add_handler(delete_product_handler, group=1)
     
     # Add conversation handler for edit product
     edit_product_conv_handler = ConversationHandler(
@@ -502,6 +511,37 @@ def main():
     )
     logger.info("Registering edit_product_conv_handler")
     application.add_handler(edit_product_conv_handler, group=1)
+    
+    # Add conversation handler for extra volume settings
+    extra_volume_settings_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^➕ تنظیم قیمت حجم اضافه$"), extra_volume_settings_scene.start_scene)],
+        states={
+            EVS_SELECT_CATEGORY: [
+                CallbackQueryHandler(extra_volume_settings_scene.select_category, pattern=r'^evs_cat_|^cancel_evs')
+            ],
+            EVS_SHOW_MENU: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, extra_volume_settings_scene.handle_menu_selection),
+                CallbackQueryHandler(extra_volume_settings_scene.toggle_status, pattern=r'^evs_enable_|^evs_back_to_menu')
+            ],
+            EVS_SET_PRICE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, extra_volume_settings_scene.set_price)
+            ],
+            EVS_SET_MIN_VOLUME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, extra_volume_settings_scene.set_min_volume)
+            ],
+            EVS_SET_MAX_VOLUME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, extra_volume_settings_scene.set_max_volume)
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", extra_volume_settings_scene.cancel),
+            MessageHandler(filters.Regex("^🔙 بازگشت به منوی مدیریت$"), extra_volume_settings_scene.cancel)
+        ],
+        name="extra_volume_settings_conversation",
+        persistent=False
+    )
+    logger.info("Registering extra_volume_settings_conv_handler")
+    application.add_handler(extra_volume_settings_conv_handler, group=1)
     
     # *** THIRD PRIORITY HANDLERS ***
     # Add callback query handler for inline buttons

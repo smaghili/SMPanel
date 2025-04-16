@@ -332,7 +332,17 @@ class AddPanelScene:
         # Reset conversation flag
         context.user_data['in_conversation'] = False
         
+        # Get chat_id and user_id
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        
         await update.message.reply_text("❌ عملیات لغو شد.")
-        # Return to admin menu
-        await self.admin_menu.show(update, context)
+        # Return to admin menu with improved state management
+        await self.admin_menu.show_with_chat_id(
+            chat_id=chat_id,
+            context=context,
+            user_id=user_id,
+            user_states_dict=context.user_data.get('user_states', {}),
+            target_state="admin_panel"
+        )
         return ConversationHandler.END 

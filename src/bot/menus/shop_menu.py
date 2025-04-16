@@ -56,7 +56,10 @@ class ShopMenu(BaseMenu):
 
     async def set_volume_price(self, update, context):
         """Handle set volume price request"""
-        await update.message.reply_text("🚧 بخش تنظیم قیمت حجم اضافه در حال توسعه است...")
+        # Import here to avoid circular import
+        from src.bot.scenes.extra_volume_settings_scene import ExtraVolumeSettingsScene
+        extra_volume_settings_scene = ExtraVolumeSettingsScene()
+        return await extra_volume_settings_scene.start_scene(update, context)
 
     async def create_gift_code(self, update, context):
         """Handle create gift code request"""

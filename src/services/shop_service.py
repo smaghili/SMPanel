@@ -672,4 +672,263 @@ class ShopService:
             logger.error(f"Unexpected error in update_product: {e}")
             import traceback
             logger.error(f"Stack trace: {traceback.format_exc()}")
-            raise ValueError(f"خطای غیرمنتظره: {e}") 
+            raise ValueError(f"خطای غیرمنتظره: {e}")
+    
+    # NEW METHODS FOR EXTRA VOLUME SETTINGS
+    
+    def get_extra_volume_settings(self, category_id):
+        """Get extra volume settings for a category
+        
+        Args:
+            category_id (int): Category ID
+            
+        Returns:
+            dict: Extra volume settings or None if not found
+        """
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            query = """
+                SELECT id, category_id, price_per_gb, min_volume, max_volume, is_enabled
+                FROM extra_volume_settings
+                WHERE category_id = %s
+            """
+            cursor.execute(query, (category_id,))
+            settings = cursor.fetchone()
+            
+            cursor.close()
+            conn.close()
+            
+            return settings
+            
+        except mysql.connector.Error as e:
+            logger.error(f"Database error in get_extra_volume_settings: {e}")
+            return None
+    
+    def create_or_update_extra_volume_settings(self, category_id, price_per_gb, min_volume, max_volume, is_enabled=True):
+        """Create or update extra volume settings for a category
+        
+        Args:
+            category_id (int): Category ID
+            price_per_gb (int): Price per gigabyte
+            min_volume (int): Minimum volume that can be purchased
+            max_volume (int): Maximum volume that can be purchased
+            is_enabled (bool): Whether extra volume purchase is enabled
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Check if settings already exist for this category
+            check_query = """
+                SELECT id FROM extra_volume_settings WHERE category_id = %s
+            """
+            cursor.execute(check_query, (category_id,))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing settings
+                query = """
+                    UPDATE extra_volume_settings
+                    SET price_per_gb = %s, min_volume = %s, max_volume = %s, is_enabled = %s
+                    WHERE category_id = %s
+                """
+                cursor.execute(query, (price_per_gb, min_volume, max_volume, is_enabled, category_id))
+            else:
+                # Create new settings
+                query = """
+                    INSERT INTO extra_volume_settings 
+                    (category_id, price_per_gb, min_volume, max_volume, is_enabled)
+                    VALUES (%s, %s, %s, %s, %s)
+                """
+                cursor.execute(query, (category_id, price_per_gb, min_volume, max_volume, is_enabled))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return True
+            
+        except mysql.connector.Error as e:
+            logger.error(f"Database error in create_or_update_extra_volume_settings: {e}")
+            return False
+    
+    def set_extra_volume_price(self, category_id, price_per_gb):
+        """Set the price per GB for extra volume
+        
+        Args:
+            category_id (int): Category ID
+            price_per_gb (int): Price per gigabyte
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            settings = self.get_extra_volume_settings(category_id)
+            
+            if settings:
+                # Update existing settings
+                return self.create_or_update_extra_volume_settings(
+                    category_id,
+                    price_per_gb,
+                    settings['min_volume'],
+                    settings['max_volume'],
+                    settings['is_enabled']
+                )
+            else:
+                # Create new settings with defaults
+                return self.create_or_update_extra_volume_settings(
+                    category_id, 
+                    price_per_gb, 
+                    1,  # Default min volume
+                    100,  # Default max volume
+                    True  # Enabled by default
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in set_extra_volume_price: {e}")
+            return False
+    
+    def set_extra_volume_min(self, category_id, min_volume):
+        """Set the minimum volume that can be purchased
+        
+        Args:
+            category_id (int): Category ID
+            min_volume (int): Minimum volume
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            settings = self.get_extra_volume_settings(category_id)
+            
+            if settings:
+                # Update existing settings
+                return self.create_or_update_extra_volume_settings(
+                    category_id,
+                    settings['price_per_gb'],
+                    min_volume,
+                    settings['max_volume'],
+                    settings['is_enabled']
+                )
+            else:
+                # Create new settings with defaults
+                return self.create_or_update_extra_volume_settings(
+                    category_id, 
+                    10000,  # Default price (10,000 tomans)
+                    min_volume, 
+                    100,  # Default max volume
+                    True  # Enabled by default
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in set_extra_volume_min: {e}")
+            return False
+    
+    def set_extra_volume_max(self, category_id, max_volume):
+        """Set the maximum volume that can be purchased
+        
+        Args:
+            category_id (int): Category ID
+            max_volume (int): Maximum volume
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            settings = self.get_extra_volume_settings(category_id)
+            
+            if settings:
+                # Update existing settings
+                return self.create_or_update_extra_volume_settings(
+                    category_id,
+                    settings['price_per_gb'],
+                    settings['min_volume'],
+                    max_volume,
+                    settings['is_enabled']
+                )
+            else:
+                # Create new settings with defaults
+                return self.create_or_update_extra_volume_settings(
+                    category_id, 
+                    10000,  # Default price (10,000 tomans)
+                    1,  # Default min volume
+                    max_volume,
+                    True  # Enabled by default
+                )
+            
+        except Exception as e:
+            logger.error(f"Error in set_extra_volume_max: {e}")
+            return False
+    
+    def set_extra_volume_enabled(self, category_id, is_enabled):
+        """Set whether extra volume purchase is enabled for a category
+        
+        Args:
+            category_id (int): Category ID
+            is_enabled (bool): Whether extra volume purchase is enabled
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            settings = self.get_extra_volume_settings(category_id)
+            
+            if settings:
+                # Update existing settings
+                return self.create_or_update_extra_volume_settings(
+                    category_id,
+                    settings['price_per_gb'],
+                    settings['min_volume'],
+                    settings['max_volume'],
+                    is_enabled
+                )
+            else:
+                # Create new settings with defaults
+                return self.create_or_update_extra_volume_settings(
+                    category_id, 
+                    10000,  # Default price (10,000 tomans)
+                    1,  # Default min volume
+                    100,  # Default max volume
+                    is_enabled
+                )
+            
+        except Exception as e:
+            logger.error(f"Error in set_extra_volume_enabled: {e}")
+            return False
+    
+    def get_products_by_category(self, category_id):
+        """Get products by category ID
+        
+        Args:
+            category_id (int): Category ID
+            
+        Returns:
+            list: List of products in the category
+        """
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            query = """
+                SELECT p.*
+                FROM products p
+                WHERE p.category_id = %s
+                ORDER BY p.name
+            """
+            cursor.execute(query, (category_id,))
+            
+            products = cursor.fetchall()
+            
+            cursor.close()
+            conn.close()
+            
+            return products
+            
+        except mysql.connector.Error as e:
+            logger.error(f"Database error in get_products_by_category: {e}")
+            return [] 

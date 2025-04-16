@@ -50,7 +50,7 @@ class AddProductScene:
             entry_points=[],  # This will be set by the caller
             states={
                 PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.product_name)],
-                SELECT_CATEGORY: [CallbackQueryHandler(self.select_category)],
+                SELECT_CATEGORY: [CallbackQueryHandler(self.handle_category_selection)],
                 DATA_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.data_limit)],
                 DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.duration)],
                 PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.price)],
@@ -142,6 +142,40 @@ class AddProductScene:
             context.user_data['in_conversation'] = False
             await self.shop_menu.show(update, context)
             return ConversationHandler.END
+    
+    async def handle_category_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle category selection from inline keyboard"""
+        query = update.callback_query
+        await query.answer()
+        
+        callback_data = query.data
+        
+        # اگر کاربر روی دکمه بازگشت کلیک کرده است
+        if callback_data == "cancel_add_product":
+            # ویرایش پیام برای نشان دادن بازگشت
+            await query.edit_message_text("بازگشت به منوی مدیریت فروشگاه...")
+            
+            # دریافت chat_id و user_id برای استفاده در show_with_chat_id
+            chat_id = update.effective_chat.id
+            user_id = update.effective_user.id
+            
+            # پاک کردن داده‌های کاربر
+            context.user_data['in_conversation'] = False
+            if 'product_data' in context.user_data:
+                del context.user_data['product_data']
+            
+            # استفاده از show_with_chat_id به جای show
+            await self.shop_menu.show_with_chat_id(
+                chat_id=chat_id,
+                context=context,
+                user_id=user_id,
+                user_states_dict=context.user_data.get('user_states', {}),
+                target_state="shop_management"
+            )
+            return ConversationHandler.END
+        
+        # در غیر این صورت، استفاده از متد select_category قبلی
+        return await self.select_category(update, context)
     
     async def select_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle category selection"""
@@ -359,14 +393,21 @@ class AddProductScene:
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel the conversation"""
         # Clean up user data
-        for key in ['product_name', 'category_id', 'category_name', 'data_limit', 'duration', 'price']:
-            if key in context.user_data:
-                del context.user_data[key]
-        
-        # Reset conversation flag
         context.user_data['in_conversation'] = False
         
-        await update.message.reply_text("❌ عملیات لغو شد.")
-        # Return to shop menu
-        await self.shop_menu.show(update, context)
+        # Get chat_id and user_id
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        
+        # Send cancellation message
+        await update.effective_message.reply_text("⛔ عملیات لغو شد.")
+        
+        # Return to shop menu with better state management
+        await self.shop_menu.show_with_chat_id(
+            chat_id=chat_id,
+            context=context,
+            user_id=user_id,
+            user_states_dict=context.user_data.get('user_states', {}),
+            target_state="shop_management"
+        )
         return ConversationHandler.END 

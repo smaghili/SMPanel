@@ -14,6 +14,7 @@ import logging
 import traceback
 
 from src.services.shop_service import ShopService
+from src.bot.menus.shop_menu import ShopMenu
 
 # Setup logging
 logging.basicConfig(
@@ -33,6 +34,7 @@ class DeleteCategoryScene:
     
     def __init__(self):
         self.shop_service = ShopService()
+        self.shop_menu = ShopMenu()
     
     def get_handler(self):
         """Get the conversation handler for this scene"""
@@ -110,55 +112,57 @@ class DeleteCategoryScene:
         query = update.callback_query
         await query.answer()
         
-        # بررسی کن که آیا هنوز در گفتگو هستیم
-        if not context.user_data.get('in_conversation', False):
-            # کاربر از طریق دکمه‌های فیزیکی از گفتگو خارج شده است
-            try:
-                await query.edit_message_text("⚠️ عملیات لغو شده است.")
-            except Exception:
-                # ممکن است پیام قبلاً ویرایش شده باشد
-                pass
-            return ConversationHandler.END
-            
         callback_data = query.data
         
-        if callback_data == "back":
-            # Return to shop menu
+        # اگر کاربر دکمه بازگشت را انتخاب کرده است
+        if callback_data == 'back':
+            # ویرایش پیام برای نشان دادن بازگشت
+            await query.edit_message_text("بازگشت به منوی مدیریت فروشگاه...")
+            
+            # دریافت chat_id و user_id برای استفاده در show_with_chat_id
+            chat_id = update.effective_chat.id
+            user_id = update.effective_user.id
+            
+            # پاک کردن داده‌های کاربر
             context.user_data['in_conversation'] = False
-            from src.bot.menus.shop_menu import ShopMenu
-            shop_menu = ShopMenu()
-            await shop_menu.show(update, context)
-            return ConversationHandler.END
+            if 'selected_categories' in context.user_data:
+                del context.user_data['selected_categories']
             
-        elif callback_data == "clear_selection":
-            # Clear selected categories
-            context.user_data['selected_categories'] = []
-            
-            # Update keyboard
-            categories = self.shop_service.get_all_categories()
-            keyboard = self._create_categories_keyboard(categories, context.user_data['selected_categories'])
-            
-            await query.edit_message_text(
-                "❌ حذف دسته بندی\n\n"
-                "📌 دسته بندی های مورد نظر برای حذف را انتخاب کنید:\n"
-                "می‌توانید چندین دسته بندی را انتخاب کنید.",
-                reply_markup=InlineKeyboardMarkup(keyboard)
+            # استفاده از show_with_chat_id به جای show
+            await self.shop_menu.show_with_chat_id(
+                chat_id=chat_id,
+                context=context,
+                user_id=user_id,
+                user_states_dict=context.user_data.get('user_states', {}),
+                target_state="shop_management"
             )
+            return ConversationHandler.END
+        
+        # اگر کاربر دکمه حذف موارد انتخاب شده را زده است
+        elif callback_data == 'delete_selected':
+            # بررسی کنیم که آیا دسته‌بندی‌ای انتخاب شده است
+            selected_categories = context.user_data.get('selected_categories', [])
             
-            return SHOW_CATEGORIES
+            if not selected_categories:
+                await query.edit_message_text(
+                    "⚠️ هیچ دسته‌بندی برای حذف انتخاب نشده است.\n"
+                    "لطفاً حداقل یک دسته‌بندی را انتخاب کنید.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 بازگشت", callback_data="back")
+                    ]])
+                )
+                return SHOW_CATEGORIES
             
-        elif callback_data == "delete_selected":
-            # Show confirmation message
+            # دریافت اطلاعات دسته‌بندی‌های انتخاب شده
             categories = self.shop_service.get_all_categories()
-            
-            # Get names of selected categories
             selected_names = []
-            for category_id in context.user_data['selected_categories']:
-                category = next((c for c in categories if c['id'] == category_id), None)
+            
+            for cat_id in selected_categories:
+                category = next((c for c in categories if c['id'] == cat_id), None)
                 if category:
                     selected_names.append(category['name'])
             
-            # Create confirmation keyboard
+            # نمایش پیام تأیید حذف
             keyboard = [
                 [
                     InlineKeyboardButton("✅ بله، حذف شود", callback_data="confirm_delete"),
@@ -166,50 +170,81 @@ class DeleteCategoryScene:
                 ]
             ]
             
+            # ساخت متن پیام تایید با نام دسته‌بندی‌های انتخاب شده
+            confirm_text = f"⚠️ آیا از حذف {len(selected_names)} دسته‌بندی زیر اطمینان دارید؟\n\n"
+            confirm_text += "📋 دسته‌بندی‌های انتخاب شده:\n"
+            for i, name in enumerate(selected_names):
+                confirm_text += f"{i+1}. {name}\n"
+            
+            confirm_text += "\n⚠️ توجه: با حذف این دسته‌بندی‌ها، محصولات مرتبط با آنها بدون دسته‌بندی خواهند شد!"
+            
             await query.edit_message_text(
-                f"⚠️ آیا از حذف {len(selected_names)} دسته بندی زیر اطمینان دارید؟\n\n"
-                f"📋 موارد انتخاب شده:\n"
-                f"{', '.join(selected_names)}\n\n"
-                f"⚠️ توجه: با حذف این دسته‌بندی‌ها، محصولات مرتبط با آنها بدون دسته‌بندی (دسته‌بندی نشده) خواهند شد!",
+                confirm_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             
             return CONFIRM_DELETE
+        
+        # اگر کاربر روی یک دسته‌بندی کلیک کرده است
+        elif callback_data.startswith('category_'):
+            # ایجاد فهرست دسته‌بندی‌های انتخاب شده اگر وجود ندارد
+            if 'selected_categories' not in context.user_data:
+                context.user_data['selected_categories'] = []
             
+            # استخراج شناسه دسته‌بندی از داده‌های بازخوردی
+            category_id = int(callback_data.split('_')[1])
+            selected_categories = context.user_data['selected_categories']
+            
+            # اضافه یا حذف دسته‌بندی از فهرست انتخاب‌ها
+            if category_id in selected_categories:
+                selected_categories.remove(category_id)
+            else:
+                selected_categories.append(category_id)
+            
+            # دریافت همه دسته‌بندی‌ها
+            categories = self.shop_service.get_all_categories()
+            
+            # ایجاد صفحه کلید با وضعیت جدید
+            keyboard = []
+            for category in categories:
+                category_id = category['id']
+                category_name = category['name']
+                
+                # بررسی آیا دسته‌بندی انتخاب شده است
+                is_selected = category_id in selected_categories
+                check_mark = "✅" if is_selected else "⬜️"
+                
+                keyboard.append([
+                    InlineKeyboardButton(f"{check_mark} {category_name}", callback_data=f"category_{category_id}")
+                ])
+            
+            # اضافه کردن دکمه حذف و بازگشت
+            keyboard.append([
+                InlineKeyboardButton("❌ حذف موارد انتخاب شده", callback_data="delete_selected"),
+                InlineKeyboardButton("🔙 بازگشت", callback_data="back")
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "❌ حذف دسته بندی\n\n"
+                "📌 دسته بندی های مورد نظر برای حذف را انتخاب کنید:\n"
+                "می‌توانید چندین دسته بندی را انتخاب کنید.",
+                reply_markup=reply_markup
+            )
+            
+            return SHOW_CATEGORIES
+        
+        # برای سایر داده‌های callback که پشتیبانی نشده‌اند
         else:
-            # Toggle category selection
-            try:
-                category_id = int(callback_data.split('_')[1])
-                
-                # Toggle selection
-                if category_id in context.user_data['selected_categories']:
-                    context.user_data['selected_categories'].remove(category_id)
-                else:
-                    context.user_data['selected_categories'].append(category_id)
-                
-                # Update keyboard
-                categories = self.shop_service.get_all_categories()
-                keyboard = self._create_categories_keyboard(categories, context.user_data['selected_categories'])
-                
-                await query.edit_message_text(
-                    "❌ حذف دسته بندی\n\n"
-                    "📌 دسته بندی های مورد نظر برای حذف را انتخاب کنید:\n"
-                    "می‌توانید چندین دسته بندی را انتخاب کنید.",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-                
-                return SHOW_CATEGORIES
-                
-            except Exception as e:
-                logger.error(f"Error handling category selection: {e}")
-                logger.error(traceback.format_exc())
-                
-                await query.edit_message_text(
-                    "❌ خطا در پردازش انتخاب دسته بندی. لطفاً دوباره تلاش کنید."
-                )
-                
-                context.user_data['in_conversation'] = False
-                return ConversationHandler.END
+            logger.warning(f"Unsupported callback data: {callback_data}")
+            await query.edit_message_text(
+                "❌ عملیات نامعتبر. لطفاً دوباره تلاش کنید.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 بازگشت", callback_data="back")
+                ]])
+            )
+            return SHOW_CATEGORIES
     
     async def handle_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle delete confirmation"""
@@ -265,11 +300,19 @@ class DeleteCategoryScene:
         if 'selected_categories' in context.user_data:
             del context.user_data['selected_categories']
         
+        # Get chat_id and user_id
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        
         await update.message.reply_text("❌ عملیات لغو شد.")
         
-        # Return to shop menu
-        from src.bot.menus.shop_menu import ShopMenu
-        shop_menu = ShopMenu()
-        await shop_menu.show(update, context)
+        # Return to shop menu with improved state management
+        await self.shop_menu.show_with_chat_id(
+            chat_id=chat_id,
+            context=context,
+            user_id=user_id,
+            user_states_dict=context.user_data.get('user_states', {}),
+            target_state="shop_management"
+        )
         
         return ConversationHandler.END 

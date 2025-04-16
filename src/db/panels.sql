@@ -68,14 +68,18 @@ CREATE TABLE IF NOT EXISTS product_panel (
 -- Create orders table if not exists
 CREATE TABLE IF NOT EXISTS orders (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    product_id INT,
     user_id INT NOT NULL,
+    order_type ENUM('product', 'extra_volume') NOT NULL DEFAULT 'product' COMMENT 'Order type: product or extra volume',
+    product_id INT NULL COMMENT 'Product ID for product purchase',
+    extra_volume_id INT NULL COMMENT 'Extra volume settings ID for volume purchase',
+    volume_gb INT NULL COMMENT 'Amount of volume purchased in GB',
     total_amount DECIMAL(10, 2) NOT NULL,
     status VARCHAR(50) DEFAULT 'pending' COMMENT 'pending, completed, cancelled',
     payment_status VARCHAR(50) DEFAULT 'unpaid' COMMENT 'paid, unpaid, refunded',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
+    FOREIGN KEY (extra_volume_id) REFERENCES extra_volume_settings(id) ON DELETE SET NULL
 );
 
 -- Create discount_codes table if not exists
@@ -114,4 +118,16 @@ CREATE TABLE IF NOT EXISTS gift_code_usages (
     FOREIGN KEY (gift_code_id) REFERENCES gift_codes(id) ON DELETE CASCADE,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     UNIQUE KEY (gift_code_id, user_id) COMMENT 'Ensures each user can use a gift code only once'
-); 
+);
+
+CREATE TABLE IF NOT EXISTS extra_volume_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    category_id INT NULL,
+    price_per_gb INT NOT NULL COMMENT 'Price per gigabyte',
+    min_volume INT DEFAULT 1 COMMENT 'Minimum volume that can be purchased (GB)',
+    max_volume INT DEFAULT 100 COMMENT 'Maximum volume that can be purchased (GB)',
+    is_enabled BOOLEAN DEFAULT TRUE COMMENT 'Whether extra volume purchase is enabled for this category',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+);
